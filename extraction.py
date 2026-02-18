@@ -5,10 +5,52 @@ Parses free-text culture reports into typed CultureReport dataclasses.
 
 import re
 import warnings
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 from data_models import CultureReport
 from rules import RULES, normalize_organism
+
+
+# ---------------------------------------------------------------------------
+# Helper: Docling Processing
+# ---------------------------------------------------------------------------
+def _process_with_docling(input_text: str) -> str:
+    """
+    Process input text using Docling.
+
+    If input_text is a valid file path, processes that file.
+    Otherwise, writes text to a temporary file and processes it.
+    Returns the structured markdown text from the document.
+    """
+    try:
+        from docling.document_converter import DocumentConverter
+    except ImportError:
+        # Silently fail or log debug if needed, but for user-facing, return original text
+        # Only warn once if desired, but here we just return
+        return input_text
+
+    input_path = Path(input_text)
+    is_file = input_path.exists() and input_path.is_file()
+
+    try:
+        converter = DocumentConverter()
+
+        if is_file:
+            # Process directly from file path
+            result = converter.convert(input_path)
+            return result.document.export_to_markdown()
+        else:
+            # Input is raw text; Docling processing via temp file may distort layout (e.g. merging lines).
+            # Fallback to returning raw text so regexes can use original newlines.
+            return input_text
+
+    except Exception as e:
+        warnings.warn(
+            f"Docling processing failed: {e}. Falling back to raw text.", UserWarning
+        )
+        return input_text
 
 
 # ---------------------------------------------------------------------------
@@ -183,18 +225,31 @@ def extract_structured_data(report_text: str) -> CultureReport:
     """
     Parse a free-text culture report into a typed CultureReport.
 
+    Now supports direct file paths via Docling processing.
+
     Rules:
         - Organism field: stripped, normalised via ORGANISM_ALIASES
         - CFU: commas removed, converted to int; TNTC=999999
         - resistance_markers: deduplicated, uppercase
         - contamination_flag: True if organism in contamination_terms
-        - raw_text: stored as-is, NEVER forwarded to MedGemma
+        - raw_text: stored as-is (or docling processed), NEVER forwarded to MedGemma
 
     Raises:
         ExtractionError: if both organism AND cfu fail to parse.
     """
-    organism = _parse_organism(report_text)
-    cfu, cfu_ok = _parse_cfu(report_text)
+    # Pre-process with Docling (handles file paths or raw text)
+    processed_text = _process_with_docling(report_text)
+
+    # Attempt extraction on processed text
+    organism = _parse_organism(processed_text)
+    cfu, cfu_ok = _parse_cfu(processed_text)
+
+    # Fallback: if extraction failed and text was modified by Docling, try original
+    if (organism is None and not cfu_ok) and processed_text != report_text:
+        organism = _parse_organism(report_text)
+        cfu, cfu_ok = _parse_cfu(report_text)
+        if organism is not None or cfu_ok:
+            processed_text = report_text  # Revert to original for other fields
 
     if organism is None and not cfu_ok:
         raise ExtractionError(
@@ -209,10 +264,10 @@ def extract_structured_data(report_text: str) -> CultureReport:
         )
         organism = "unknown"
 
-    resistance_markers = _parse_resistance_markers(report_text)
-    specimen_type = _parse_specimen(report_text)
+    resistance_markers = _parse_resistance_markers(processed_text)
+    specimen_type = _parse_specimen(processed_text)
     contamination_flag = _is_contamination(organism)
-    date = _parse_date(report_text)
+    date = _parse_date(processed_text)
 
     return CultureReport(
         date=date,
@@ -221,5 +276,5 @@ def extract_structured_data(report_text: str) -> CultureReport:
         resistance_markers=resistance_markers,
         specimen_type=specimen_type,
         contamination_flag=contamination_flag,
-        raw_text=report_text,  # stored; never forwarded to LLM
+        raw_text=processed_text,  # Store the text actually used for extraction
     )
