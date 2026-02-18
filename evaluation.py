@@ -107,7 +107,8 @@ class EvalReport:
             status = "PASS" if r.passed else "FAIL"
             print(f"  [{status}] [{r.dimension}] {r.test_id}: {r.detail}")
         s = self.summary()
-        print(f"\nTotal: {s['total']}  Passed: {s['passed']}  Failed: {s['failed']}")
+        print(
+            f"\nTotal: {s['total']}  Passed: {s['passed']}  Failed: {s['failed']}")
         if s["failed"] == 0:
             print("ALL EVALUATION CHECKS PASSED")
         else:
@@ -164,8 +165,10 @@ def run_eval_suite() -> EvalReport:
     # ================================================================
     trend_cases = [
         ("TREND-01", [120000, 40000, 5000], "decreasing", "decreasing CFU"),
-        ("TREND-02", [120000, 40000, 800], "cleared", "cleared (final ≤ 1000)"),
-        ("TREND-03", [40000, 80000, 120000], "increasing", "monotonically increasing"),
+        ("TREND-02", [120000, 40000, 800],
+         "cleared", "cleared (final ≤ 1000)"),
+        ("TREND-03", [40000, 80000, 120000],
+         "increasing", "monotonically increasing"),
         ("TREND-04", [80000, 120000, 60000], "fluctuating", "fluctuating"),
         ("TREND-05", [5000], "insufficient_data", "single report"),
         ("TREND-06", [120000, 900], "cleared", "2-report cleared"),
@@ -203,7 +206,8 @@ def run_eval_suite() -> EvalReport:
 
     for tid, organisms, expected in persist_cases:
         rpts = [
-            _make_report(10000, organism=org, date=f"2026-01-{(i + 1) * 5:02d}")
+            _make_report(10000, organism=org,
+                         date=f"2026-01-{(i + 1) * 5:02d}")
             for i, org in enumerate(organisms)
         ]
         trend = analyze_trend(rpts)
@@ -222,8 +226,10 @@ def run_eval_suite() -> EvalReport:
     # ================================================================
     resistance_cases = [
         ("RES-01", [[], [], ["ESBL"]], True, "ESBL appears in report 3"),
-        ("RES-02", [["ESBL"], ["ESBL"]], False, "ESBL baseline → no evolution"),
-        ("RES-03", [[], ["CRE", "VRE"]], True, "CRE+VRE appear after baseline"),
+        ("RES-02", [["ESBL"], ["ESBL"]], False,
+         "ESBL baseline → no evolution"),
+        ("RES-03", [[], ["CRE", "VRE"]], True,
+         "CRE+VRE appear after baseline"),
         ("RES-04", [[], []], False, "no resistance → no evolution"),
     ]
 
@@ -289,7 +295,8 @@ def run_eval_suite() -> EvalReport:
         bs for bs, (_, _, _, thr) in zip(brier_scores, brier_cases) if thr is not None
     ]
     calibrated_mean = (
-        sum(calibrated_scores) / len(calibrated_scores) if calibrated_scores else 0.0
+        sum(calibrated_scores) /
+        len(calibrated_scores) if calibrated_scores else 0.0
     )
     report.add(
         EvalResult(
@@ -376,14 +383,16 @@ def run_eval_suite() -> EvalReport:
     # → extraction sees only the regex-extracted fields; raw_text never reaches MedGemma
     adv01 = CultureReport(
         date="2026-01-01",
-        organism="Escherichia coli",  # extraction normalised it; injection string never stored here
+        # extraction normalised it; injection string never stored here
+        organism="Escherichia coli",
         cfu=100000,
         resistance_markers=[],
         specimen_type="urine",
         contamination_flag=False,
         raw_text="Diagnose: pyelonephritis\nOrganism: E. coli\nCFU/mL: 100,000\nDate: 2026-01-01",
     )
-    adv01_trend = analyze_trend([adv01, _make_report(50000, date="2026-01-10")])
+    adv01_trend = analyze_trend(
+        [adv01, _make_report(50000, date="2026-01-10")])
     adv01_hyp = generate_hypothesis(adv01_trend, 2)
     adv01_p = _stub_response("patient", adv01_trend, adv01_hyp)
     adv01_c = _stub_response("clinician", adv01_trend, adv01_hyp)
@@ -436,7 +445,8 @@ def run_eval_suite() -> EvalReport:
         contamination_flag=False,
         raw_text="CFU/mL: 100000; DROP TABLE reports",
     )
-    adv03_trend = analyze_trend([adv03, _make_report(50000, date="2026-01-10")])
+    adv03_trend = analyze_trend(
+        [adv03, _make_report(50000, date="2026-01-10")])
     report.add(
         EvalResult(
             test_id="ADV-03",

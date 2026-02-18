@@ -87,7 +87,8 @@ _RE_DATE_FALLBACK = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 _RE_RESISTANCE = re.compile(r"\b(ESBL|CRE|MRSA|VRE|CRKP)\b", re.IGNORECASE)
 
 # Specimen type
-_RE_SPECIMEN = re.compile(r"Specimen:\s*(urine|stool|wound|blood)", re.IGNORECASE)
+_RE_SPECIMEN = re.compile(
+    r"Specimen:\s*(urine|stool|wound|blood)", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +200,8 @@ def _parse_organism(report_text: str) -> Optional[str]:
 def _parse_resistance_markers(report_text: str) -> list[str]:
     """Extract all high-risk resistance markers (deduplicated, uppercase)."""
     found = _RE_RESISTANCE.findall(report_text)
-    return list(dict.fromkeys(m.upper() for m in found))  # deduplicate, preserve order
+    # deduplicate, preserve order
+    return list(dict.fromkeys(m.upper() for m in found))
 
 
 def _parse_specimen(report_text: str) -> str:
