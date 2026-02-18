@@ -26,6 +26,7 @@ LOCAL_MODULES = {
     "medgemma",
     "renderer",
     "evaluation",
+    "extraction_agent",
 }
 
 
@@ -237,6 +238,20 @@ Validates all 7 PRD evaluation dimensions:
 | Adversarial Robustness | 100% |
 """
 
+GRADIO_MD = """## Cell J: Gradio UI — Extraction Agent
+
+Interactive Gradio application with two entry modes:
+
+- **Tab A — Upload PDF**: Upload one or more culture report PDFs. Docling parses each
+  file into markdown, which is fed into the existing `extract_structured_data()` regex
+  layer. Extracted records are shown in an editable review table before analysis.
+- **Tab B — Enter Manually**: Paste free-text culture reports directly (existing flow).
+
+The three-screen state machine (Upload → Review & Confirm → Analysis) is implemented
+entirely via `gr.State` + `gr.update(visible=…)`. The downstream pipeline
+(`analyze_trend`, `generate_hypothesis`, `call_medgemma`, `render_*`) is unchanged.
+"""
+
 FOOTER_MD = """---
 
 ## Safety & Regulatory Positioning
@@ -291,6 +306,14 @@ cells = [
     code_cell(
         inline("evaluation.py")
         + "\n\n# Run evaluation\nreport = run_eval_suite()\nreport.print_report()"
+    ),
+    # J: Gradio UI — Extraction Agent
+    md_cell(GRADIO_MD),
+    code_cell(inline("extraction_agent.py")),
+    code_cell(
+        "# Launch the CultureSense Gradio app\n"
+        "demo = build_gradio_app(model, tokenizer, is_stub)\n"
+        "demo.launch(share=True)"
     ),
     md_cell(FOOTER_MD),
 ]
