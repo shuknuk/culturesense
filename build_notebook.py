@@ -174,6 +174,15 @@ Only derived structured fields (typed dataclasses → JSON) are passed to the mo
 
 SETUP_MD = "## Cell A: Setup & Imports"
 
+CLONE_CODE = """# Cell A-1: Repository Setup (for Colab/Kaggle)
+import os
+if not os.path.exists('culturesense'):
+    !git clone https://github.com/shuknuk/culturesense.git
+    %cd culturesense
+else:
+    print("Repository 'culturesense' already exists.")
+"""
+
 SETUP_CODE = """# Cell A-2: Library Installation
 import subprocess, sys
 
@@ -273,6 +282,7 @@ FOOTER_MD = """---
 cells = [
     md_cell(TITLE_MD),
     md_cell(SETUP_MD),
+    code_cell(CLONE_CODE),
     code_cell(SETUP_CODE),
     code_cell(IMPORTS_CODE),
     # B: Data Models (standalone — no local imports)
