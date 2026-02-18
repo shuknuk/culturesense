@@ -1,0 +1,169 @@
+"""
+CultureSense Hypothesis Update Layer (Cell Group E)
+Deterministic confidence scoring and risk flag assignment.
+"""
+
+from typing import List
+
+from data_models import TrendResult, HypothesisResult
+from rules import RULES
+
+
+# ---------------------------------------------------------------------------
+# Risk flag constants
+# ---------------------------------------------------------------------------
+FLAG_EMERGING_RESISTANCE = "EMERGING_RESISTANCE"
+FLAG_CONTAMINATION = "CONTAMINATION_SUSPECTED"
+FLAG_NON_RESPONSE = "NON_RESPONSE_PATTERN"
+FLAG_INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+FLAG_ORGANISM_CHANGE = "ORGANISM_CHANGE"
+
+
+# ---------------------------------------------------------------------------
+# Confidence scoring
+# ---------------------------------------------------------------------------
+
+
+def _score_confidence(trend: TrendResult, report_count: int) -> float:
+    """
+    Apply deterministic signal adjustments to a base confidence value.
+
+    Starting point: RULES["base_confidence"] = 0.50
+    Each signal adds or subtracts a fixed delta.
+    Final value is clamped to [0.0, RULES["max_confidence"]].
+
+    Signal table (Section 7.1):
+        +0.30  CFU decreasing
+        +0.40  CFU cleared
+        +0.20  CFU increasing  (high confidence of non-response)
+        -0.10  CFU fluctuating
+        -0.10  resistance evolution
+        -0.05  organism changed
+        -0.20  contamination present
+        -0.25  fewer than 2 reports
+    """
+    confidence = RULES["base_confidence"]
+
+    # Trend signal
+    if trend.cfu_trend == "decreasing":
+        confidence += 0.30
+    elif trend.cfu_trend == "cleared":
+        confidence += 0.40
+    elif trend.cfu_trend == "increasing":
+        confidence += 0.20  # high confidence of non-response
+    elif trend.cfu_trend == "fluctuating":
+        confidence -= 0.10
+
+    # Resistance evolution penalty
+    if trend.resistance_evolution:
+        confidence -= 0.10
+
+    # Organism change uncertainty
+    if not trend.organism_persistent:
+        confidence -= 0.05
+
+    # Contamination validity concern
+    if trend.any_contamination:
+        confidence -= 0.20
+
+    # Insufficient data penalty
+    if report_count < 2:
+        confidence -= 0.25
+
+    # Hard clamp: never < 0.0, never > max_confidence (epistemic humility)
+    return round(max(0.0, min(confidence, RULES["max_confidence"])), 4)
+
+
+# ---------------------------------------------------------------------------
+# Risk flag assignment (Section 7.2)
+# ---------------------------------------------------------------------------
+
+
+def _assign_risk_flags(trend: TrendResult, report_count: int) -> List[str]:
+    """Build a list of risk flag strings from trend signals."""
+    flags: List[str] = []
+
+    if trend.resistance_evolution:
+        flags.append(FLAG_EMERGING_RESISTANCE)
+
+    if trend.any_contamination:
+        flags.append(FLAG_CONTAMINATION)
+
+    if trend.cfu_trend == "increasing":
+        flags.append(FLAG_NON_RESPONSE)
+
+    if report_count < 2:
+        flags.append(FLAG_INSUFFICIENT_DATA)
+
+    if not trend.organism_persistent:
+        flags.append(FLAG_ORGANISM_CHANGE)
+
+    return flags
+
+
+# ---------------------------------------------------------------------------
+# Interpretation string construction (Section 7.3)
+# ---------------------------------------------------------------------------
+
+
+def _build_interpretation(trend: TrendResult, report_count: int) -> str:
+    """
+    Construct a rule-generated natural language pattern summary.
+
+    This string is passed to MedGemma only as structured context inside
+    the JSON payload — never as a direct LLM prompt.
+    """
+    parts: List[str] = []
+
+    if trend.cfu_trend == "decreasing":
+        parts.append("Pattern suggests improving infection response.")
+    elif trend.cfu_trend == "cleared":
+        parts.append("Pattern suggests possible resolution.")
+    elif trend.cfu_trend == "increasing":
+        parts.append("Pattern suggests possible non-response.")
+    elif trend.cfu_trend == "fluctuating":
+        parts.append("Pattern is variable — requires clinical context.")
+    elif trend.cfu_trend == "insufficient_data":
+        parts.append("Insufficient longitudinal data for trend analysis.")
+
+    if trend.resistance_evolution:
+        parts.append("Emerging resistance observed.")
+
+    if not trend.organism_persistent:
+        parts.append("Organism change may indicate reinfection.")
+
+    if trend.any_contamination:
+        parts.append("Contamination suspected — interpret with caution.")
+
+    return " ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def generate_hypothesis(trend: TrendResult, report_count: int) -> HypothesisResult:
+    """
+    Generate a deterministic hypothesis from a TrendResult.
+
+    Args:
+        trend: Computed TrendResult from the trend engine.
+        report_count: Number of source reports (used for insufficient-data logic).
+
+    Returns:
+        HypothesisResult with confidence score, risk flags, interpretation,
+        stewardship alert, and mandatory clinician review flag.
+    """
+    confidence = _score_confidence(trend, report_count)
+    risk_flags = _assign_risk_flags(trend, report_count)
+    interpretation = _build_interpretation(trend, report_count)
+    stewardship_alert = trend.resistance_evolution
+
+    return HypothesisResult(
+        interpretation=interpretation,
+        confidence=confidence,
+        risk_flags=risk_flags,
+        stewardship_alert=stewardship_alert,
+        requires_clinician_review=True,  # Always True — structural safety guarantee
+    )
