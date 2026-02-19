@@ -34,6 +34,24 @@ from rules import RULES
 MAX_RECORDS = 3
 _WARN_PREFIX = "⚠ "
 
+# ---------------------------------------------------------------------------
+# Theme Definition — "Orange Design Theme, Warm Classical UI"
+# ---------------------------------------------------------------------------
+
+WARM_CLINICAL_THEME = gr.themes.Soft(
+    primary_hue="orange",
+    neutral_hue="stone",
+    font=[gr.themes.GoogleFont("Crimson Pro"), "serif"],
+    font_mono=[gr.themes.GoogleFont("Fira Code"), "monospace"],
+).set(
+    body_background_fill="#fdf9f3",  # Warm cream background
+    block_background_fill="#ffffff",
+    block_border_width="1px",
+    block_title_text_font="Crimson Pro",
+    button_primary_background_fill="#e67e22",
+    button_primary_background_fill_hover="#d35400",
+)
+
 
 # ---------------------------------------------------------------------------
 # 1. Docling PDF processor
@@ -300,23 +318,25 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         return patient_out, clinician_out
 
     def format_output_html(patient_out, clinician_out) -> Tuple[str, str]:
-        """Convert FormattedOutput objects to display HTML."""
+        """Convert FormattedOutput objects to display HTML with warm theme."""
         # Patient card
         p_lines = []
         if patient_out.patient_explanation:
-            p_lines.append(f"<p>{patient_out.patient_explanation}</p>")
+            p_lines.append(f"<p style='color:#5d4037;'>{patient_out.patient_explanation}</p>")
         if patient_out.patient_trend_phrase:
-            p_lines.append(f"<p><b>Trend:</b> {patient_out.patient_trend_phrase}</p>")
+            p_lines.append(f"<p><b>Trend:</b> <i style='color:#d35400;'>{patient_out.patient_trend_phrase}</i></p>")
         if patient_out.patient_questions:
-            qs = "".join(f"<li>{q}</li>" for q in patient_out.patient_questions)
-            p_lines.append(f"<ul>{qs}</ul>")
+            qs = "".join(f"<li style='margin-bottom:6px;'>{q}</li>" for q in patient_out.patient_questions)
+            p_lines.append(f"<ul style='color:#5d4037;'>{qs}</ul>")
         if patient_out.patient_disclaimer:
             p_lines.append(
-                f'<p style="color:#888;font-size:0.85em">{patient_out.patient_disclaimer}</p>'
+                f'<p style="color:#8d6e63;font-size:0.85em;font-style:italic;margin-top:10px;">'
+                f'{patient_out.patient_disclaimer}</p>'
             )
         patient_html = (
-            '<div style="background:#f0f8ff;border:1px solid #b0d4f1;padding:16px;border-radius:8px">'
-            '<h3 style="margin-top:0">🧑‍⚕️ Patient Summary</h3>'
+            '<div style="background:#fffaf0;border:1px solid #fceec7;padding:20px;border-radius:12px;'
+            'border-left:6px solid #f39c12;font-family:\'Crimson Pro\', serif;box-shadow:2px 2px 5px rgba(0,0,0,0.05);">'
+            '<h3 style="margin-top:0;color:#d35400;font-variant:small-caps;">🧑‍⚕️ Patient Summary</h3>'
             + "".join(p_lines)
             + "</div>"
         )
@@ -324,30 +344,30 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         # Clinician card
         c_lines = []
         if clinician_out.clinician_interpretation:
-            c_lines.append(f"<p>{clinician_out.clinician_interpretation}</p>")
-        if clinician_out.clinician_trajectory:
-            c_lines.append(
-                f"<p><b>Trajectory:</b> {clinician_out.clinician_trajectory}</p>"
-            )
+            c_lines.append(f"<p style='color:#3d2b1f;'>{clinician_out.clinician_interpretation}</p>")
         if clinician_out.clinician_confidence is not None:
             c_lines.append(
-                f"<p><b>Confidence:</b> {clinician_out.clinician_confidence:.0%}</p>"
+                f"<p><b>Confidence:</b> <span style='font-size:1.1em;color:#e67e22;font-weight:bold;'>"
+                f"{clinician_out.clinician_confidence:.0%}</span></p>"
             )
         if clinician_out.clinician_resistance_detail:
             c_lines.append(
-                f"<p><b>Resistance:</b> {clinician_out.clinician_resistance_detail}</p>"
+                f"<div style='background:#fff3cd;padding:8px;border-radius:4px;border-left:4px solid #ffc107;font-size:0.9em;'>"
+                f"<b>Resistance Detail:</b><pre style='margin:4px 0;'>{clinician_out.clinician_resistance_detail}</pre></div>"
             )
         if clinician_out.clinician_stewardship_flag:
             c_lines.append(
-                '<p style="color:#c0392b"><b>⚠ Antibiotic stewardship alert</b></p>'
+                '<p style="color:#c0392b;font-weight:bold;margin-top:10px;">⚠ Stewardship Alert: Emerging resistance detected.</p>'
             )
         if clinician_out.clinician_disclaimer:
             c_lines.append(
-                f'<p style="color:#888;font-size:0.85em">{clinician_out.clinician_disclaimer}</p>'
+                f'<p style="color:#8d6e63;font-size:0.8em;font-style:italic;margin-top:10px;border-top:1px solid #efebe9;padding-top:8px;">'
+                f'{clinician_out.clinician_disclaimer}</p>'
             )
         clinician_html = (
-            '<div style="background:#fff8f0;border:1px solid #f0c080;padding:16px;border-radius:8px;margin-top:12px">'
-            '<h3 style="margin-top:0">🔬 Clinical Interpretation</h3>'
+            '<div style="background:#fefefe;border:1px solid #eee;padding:20px;border-radius:12px;'
+            'border-left:6px solid #795548;font-family:\'Crimson Pro\', serif;margin-top:16px;box-shadow:2px 2px 5px rgba(0,0,0,0.05);">'
+            '<h3 style="margin-top:0;color:#5d4037;font-variant:small-caps;">🔬 Clinical Interpretation</h3>'
             + "".join(c_lines)
             + "</div>"
         )
@@ -357,14 +377,18 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
     # ── Gradio Blocks ───────────────────────────────────────────────────────
     with gr.Blocks(
         title="CultureSense — Longitudinal Clinical Hypothesis Engine",
-        theme=gr.themes.Soft(),
+        theme=WARM_CLINICAL_THEME,
         css="""
         .screen { padding: 8px 0; }
-        .status-box { font-size: 0.9em; line-height: 1.8; }
+        .status-box { font-size: 0.9em; line-height: 1.8; font-family: 'Crimson Pro', serif; }
         .error-banner {
-            background: #fdecea; border: 1px solid #e57373;
+            background: #fff5f5; border: 1px solid #feb2b2;
             padding: 14px 18px; border-radius: 8px; margin: 12px 0;
+            color: #9b2c2c;
         }
+        /* Ensure inputs still use sans-serif for clarity, while headers use serif */
+        input, textarea, select { font-family: sans-serif !important; }
+        .gr-button-primary { box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         """,
     ) as demo:
 
