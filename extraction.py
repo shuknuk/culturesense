@@ -4,8 +4,8 @@ Parses free-text culture reports into typed CultureReport dataclasses.
 """
 
 import re
-import warnings
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Optional
 
@@ -61,38 +61,73 @@ class ExtractionError(ValueError):
 
 
 # ---------------------------------------------------------------------------
-# Compiled regex patterns (Section 5.2)
+# Compiled regex patterns (Section 5.2) - ENHANCED for flexibility
 # ---------------------------------------------------------------------------
 
-# Organism: "Organism: <value>" up to newline or end of string
-_RE_ORGANISM = re.compile(r"Organism:\s*(.+?)(?:\n|$)", re.IGNORECASE)
+# Organism: Multiple patterns to handle various lab report formats
+# Fixed: Use greedy match that captures until newline but handles dots in names like "E. coli"
+_RE_ORGANISM_PRIMARY = re.compile(r"Organism:\s*([^.].*?)(?:\n|$)", re.IGNORECASE)
+_RE_ORGANISM_ALT1 = re.compile(
+    r"Organism\s+identified:\s*([^.].*?)(?:\n|$)", re.IGNORECASE
+)
+_RE_ORGANISM_ALT2 = re.compile(r"Isolated:\s*([^.].*?)(?:\n|$)", re.IGNORECASE)
+_RE_ORGANISM_ALT3 = re.compile(r"Identification:\s*([^.].*?)(?:\n|$)", re.IGNORECASE)
+_RE_ORGANISM_ALT4 = re.compile(
+    r"Culture\s+results?:\s*([^.].*?)(?:\n|$)", re.IGNORECASE
+)
+_RE_ORGANISM_ALT5 = re.compile(r"ORGANISM:\s*([^.].*?)(?:\n|$)", re.IGNORECASE)
 
-# CFU/mL: "CFU/mL: <digits with optional commas>"
-_RE_CFU_PRIMARY = re.compile(r"CFU/mL:\s*([\d,]+)", re.IGNORECASE)
+# CFU/mL: Multiple patterns for various formats
+_RE_CFU_PRIMARY = re.compile(r"CFU[/\\]?m?L?:\s*([><]?\s*[\d,]+)", re.IGNORECASE)
+_RE_CFU_ALT1 = re.compile(
+    r"(?:Count|Quantity|Result):\s*([><]?\s*[\d,]+)", re.IGNORECASE
+)
+_RE_CFU_ALT2 = re.compile(r"([\d,]+)\s*(?:CFU|colonies|cells)", re.IGNORECASE)
+_RE_CFU_ALT3 = re.compile(r">\s*?([\d,]+)", re.IGNORECASE)  # >100,000
+_RE_CFU_ALT4 = re.compile(r"(\d{2,3},\d{3})", re.IGNORECASE)  # 100,000 pattern
 
 # Fallback CFU patterns
 _RE_CFU_SCIENTIFIC = re.compile(r"10\^(\d+)", re.IGNORECASE)  # 10^5 → 100000
 _RE_CFU_WORD = re.compile(r"(TNTC|Too\s+Numerous\s+To\s+Count)", re.IGNORECASE)
-_RE_CFU_NO_GROWTH = re.compile(r"(No\s+growth|0\s+CFU)", re.IGNORECASE)
-_RE_CFU_RAW_NUMBER = re.compile(r"\b([\d]{4,})\b")  # bare large number
+_RE_CFU_NO_GROWTH = re.compile(
+    r"(No\s+growth|No\s+significant\s+growth|0\s+CFU|Negative)", re.IGNORECASE
+)
+_RE_CFU_RAW_NUMBER = re.compile(r"\b([\d]{5,})\b")  # bare large number (5+ digits)
 
-# Date: ISO 8601 or MM/DD/YYYY
+# Date: Multiple patterns for various formats
 _RE_DATE_PRIMARY = re.compile(
-    r"(?:Date|Collected|Reported):\s*(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})",
+    r"(?:Date|Collected|Reported|Specimen\s+Date|Collection\s+Date)[\s:]+(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})",
     re.IGNORECASE,
 )
-_RE_DATE_FALLBACK = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+_RE_DATE_ALT1 = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")  # ISO format anywhere
+_RE_DATE_ALT2 = re.compile(r"\b(\d{2}/\d{2}/\d{4})\b")  # MM/DD/YYYY anywhere
+_RE_DATE_ALT3 = re.compile(r"\b(\d{2}-\d{2}-\d{4})\b")  # MM-DD-YYYY anywhere
 
 # Resistance markers: exact case-insensitive word boundaries
 _RE_RESISTANCE = re.compile(r"\b(ESBL|CRE|MRSA|VRE|CRKP)\b", re.IGNORECASE)
 
-# Specimen type
-_RE_SPECIMEN = re.compile(
-    r"Specimen:\s*(urine|stool|wound|blood)", re.IGNORECASE)
+# Specimen type - ENHANCED: multiple patterns and keyword detection
+_RE_SPECIMEN_PRIMARY = re.compile(
+    r"(?:Specimen|Sample|Source|Type)[\s:]+(urine|stool|wound|blood|urinary|fecal|faecal)",
+    re.IGNORECASE,
+)
+_RE_SPECIMEN_ALT1 = re.compile(
+    r"(urine|stool|wound|blood)\s*(?:culture|specimen|sample|test)", re.IGNORECASE
+)
+_RE_SPECIMEN_ALT2 = re.compile(
+    r"(?:culture|specimen|sample|test)\s*(?:type)?[\s:]+(urine|stool|wound|blood)",
+    re.IGNORECASE,
+)
+_RE_SPECIMEN_URINE_KEYWORD = re.compile(
+    r"\b(urine|urinary|bladder|catheter)\b", re.IGNORECASE
+)
+_RE_SPECIMEN_STOOL_KEYWORD = re.compile(
+    r"\b(stool|fecal|faecal|feces|gi)\b", re.IGNORECASE
+)
 
 
 # ---------------------------------------------------------------------------
-# CFU normalisation helper (Section 5.4)
+# CFU normalisation helper (Section 5.4) - ENHANCED
 # ---------------------------------------------------------------------------
 
 
@@ -107,11 +142,32 @@ def _parse_cfu(report_text: str) -> tuple[int, bool]:
         - "TNTC" / "Too Numerous To Count" → 999999
         - "No growth" / "0 CFU"            → 0
         - "10^5"                            → 100000
+        - ">100,000" or "> 100,000"         → 100000 (or parse the number)
         - comma-separated integer           → int (commas stripped)
         - Missing/unparseable               → 0 with warning
     """
-    # 1. Primary: "CFU/mL: 120,000"
-    m = _RE_CFU_PRIMARY.search(report_text)
+    text = report_text.strip()
+
+    # 1. Primary: "CFU/mL: 120,000" or "CFU/mL: >100,000"
+    m = _RE_CFU_PRIMARY.search(text)
+    if m:
+        raw = m.group(1).replace(",", "").replace(">", "").replace("<", "").strip()
+        try:
+            return int(raw), True
+        except ValueError:
+            pass
+
+    # 2. Alternative: "Count: 120,000" or "Result: >100,000"
+    m = _RE_CFU_ALT1.search(text)
+    if m:
+        raw = m.group(1).replace(",", "").replace(">", "").replace("<", "").strip()
+        try:
+            return int(raw), True
+        except ValueError:
+            pass
+
+    # 3. Alternative: "120,000 CFU" or "120,000 colonies"
+    m = _RE_CFU_ALT2.search(text)
     if m:
         raw = m.group(1).replace(",", "")
         try:
@@ -119,24 +175,42 @@ def _parse_cfu(report_text: str) -> tuple[int, bool]:
         except ValueError:
             pass
 
-    # 2. TNTC
-    if _RE_CFU_WORD.search(report_text):
+    # 4. Alternative: ">100,000" or "> 100,000"
+    m = _RE_CFU_ALT3.search(text)
+    if m:
+        raw = m.group(1).replace(",", "")
+        try:
+            return int(raw), True
+        except ValueError:
+            pass
+
+    # 5. Alternative: standalone 100,000 pattern
+    m = _RE_CFU_ALT4.search(text)
+    if m:
+        raw = m.group(1).replace(",", "")
+        try:
+            return int(raw), True
+        except ValueError:
+            pass
+
+    # 6. TNTC
+    if _RE_CFU_WORD.search(text):
         return 999999, True
 
-    # 3. No growth
-    if _RE_CFU_NO_GROWTH.search(report_text):
+    # 7. No growth / negative
+    if _RE_CFU_NO_GROWTH.search(text):
         return 0, True
 
-    # 4. Scientific notation "10^5"
-    m = _RE_CFU_SCIENTIFIC.search(report_text)
+    # 8. Scientific notation "10^5"
+    m = _RE_CFU_SCIENTIFIC.search(text)
     if m:
         try:
             return 10 ** int(m.group(1)), True
         except (ValueError, OverflowError):
             pass
 
-    # 5. Bare large integer (≥4 digits) — last resort fallback
-    m = _RE_CFU_RAW_NUMBER.search(report_text)
+    # 9. Bare large integer (≥5 digits) — last resort fallback
+    m = _RE_CFU_RAW_NUMBER.search(text)
     if m:
         raw = m.group(1).replace(",", "")
         try:
@@ -158,36 +232,90 @@ def _parse_cfu(report_text: str) -> tuple[int, bool]:
 
 def _parse_date(report_text: str) -> str:
     """Extract and normalise the collection date from report text."""
+    # Primary: prefixed dates
     m = _RE_DATE_PRIMARY.search(report_text)
     if m:
         raw = m.group(1)
-        # Convert MM/DD/YYYY → YYYY-MM-DD
-        if "/" in raw:
-            parts = raw.split("/")
-            return f"{parts[2]}-{parts[0].zfill(2)}-{parts[1].zfill(2)}"
-        return raw
+        return _normalize_date(raw)
 
-    # Fallback: any ISO date in text
-    m = _RE_DATE_FALLBACK.search(report_text)
+    # Alt1: ISO format anywhere
+    m = _RE_DATE_ALT1.search(report_text)
     if m:
         return m.group(1)
+
+    # Alt2: MM/DD/YYYY anywhere
+    m = _RE_DATE_ALT2.search(report_text)
+    if m:
+        return _normalize_date(m.group(1))
+
+    # Alt3: MM-DD-YYYY anywhere
+    m = _RE_DATE_ALT3.search(report_text)
+    if m:
+        raw = m.group(1).replace("-", "/")
+        return _normalize_date(raw)
+
+    return "unknown"
+
+
+def _normalize_date(raw: str) -> str:
+    """Convert various date formats to ISO 8601 (YYYY-MM-DD)."""
+    raw = raw.strip()
+
+    # Already ISO format
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        return raw
+
+    # MM/DD/YYYY or MM-DD-YYYY
+    if "/" in raw or "-" in raw:
+        sep = "/" if "/" in raw else "-"
+        parts = raw.split(sep)
+        if len(parts) == 3:
+            # Determine if first part is month or day based on values
+            first, second, year = parts[0], parts[1], parts[2]
+            # If first > 12, it's likely DD/MM/YYYY
+            if int(first) > 12:
+                # DD/MM/YYYY → YYYY-MM-DD
+                return f"{year}-{second.zfill(2)}-{first.zfill(2)}"
+            else:
+                # MM/DD/YYYY → YYYY-MM-DD
+                return f"{year}-{first.zfill(2)}-{second.zfill(2)}"
 
     return "unknown"
 
 
 def _parse_organism(report_text: str) -> Optional[str]:
     """
-    Extract organism name from report text.
-
-    Primary: "Organism: <value>"
-    Fallback: scan for known organism names / aliases.
+    Extract organism name from report text with multiple pattern attempts.
     """
-    m = _RE_ORGANISM.search(report_text)
-    if m:
-        return normalize_organism(m.group(1).strip())
+    text = report_text.strip()
+
+    # Try multiple organism patterns in order
+    patterns = [
+        _RE_ORGANISM_PRIMARY,
+        _RE_ORGANISM_ALT5,  # ORGANISM: (all caps)
+        _RE_ORGANISM_ALT1,  # Organism identified:
+        _RE_ORGANISM_ALT2,  # Isolated:
+        _RE_ORGANISM_ALT3,  # Identification:
+        _RE_ORGANISM_ALT4,  # Culture result:
+    ]
+
+    for pattern in patterns:
+        m = pattern.search(text)
+        if m:
+            raw_organism = m.group(1).strip()
+            # Clean up common artifacts but preserve dots in organism names like "E. coli"
+            raw_organism = re.sub(r"\s+", " ", raw_organism)  # normalize whitespace
+            # Don't split on dots - they're part of organism names like "E. coli"
+            # Only truncate if there's clear sentence-ending punctuation
+            if re.search(r"[;!?]|\.\s+[A-Z]", raw_organism):
+                # Find the first sentence-ending punctuation
+                match = re.search(r"([;!?]|\.\s+[A-Z])", raw_organism)
+                if match:
+                    raw_organism = raw_organism[: match.start()]
+            return normalize_organism(raw_organism)
 
     # Fallback: search for known organism aliases in full text
-    lower_text = report_text.lower()
+    lower_text = text.lower()
     from rules import ORGANISM_ALIASES
 
     for alias in sorted(ORGANISM_ALIASES.keys(), key=len, reverse=True):
@@ -205,17 +333,98 @@ def _parse_resistance_markers(report_text: str) -> list[str]:
 
 
 def _parse_specimen(report_text: str) -> str:
-    """Extract specimen type; defaults to 'unknown'."""
-    m = _RE_SPECIMEN.search(report_text)
+    """
+    Extract specimen type with multiple pattern attempts and keyword detection.
+    Returns 'urine', 'stool', 'wound', 'blood', or 'unknown'.
+    """
+    text = report_text.strip()
+
+    # Try primary pattern: Specimen/Sample/Source/Type: urine/stool
+    m = _RE_SPECIMEN_PRIMARY.search(text)
     if m:
-        return m.group(1).lower()
+        specimen = m.group(1).lower()
+        return _normalize_specimen(specimen)
+
+    # Try alternative: urine/stool culture
+    m = _RE_SPECIMEN_ALT1.search(text)
+    if m:
+        return _normalize_specimen(m.group(1).lower())
+
+    # Try alternative: culture: urine/stool
+    m = _RE_SPECIMEN_ALT2.search(text)
+    if m:
+        return _normalize_specimen(m.group(1).lower())
+
+    # Keyword detection: look for urine/urinary keywords anywhere
+    if _RE_SPECIMEN_URINE_KEYWORD.search(text):
+        return "urine"
+
+    # Keyword detection: look for stool/fecal keywords anywhere
+    if _RE_SPECIMEN_STOOL_KEYWORD.search(text):
+        return "stool"
+
     return "unknown"
+
+
+def _normalize_specimen(specimen: str) -> str:
+    """Normalize specimen type to standard values."""
+    specimen = specimen.lower().strip()
+
+    # Map variations to standard types
+    if specimen in ("urine", "urinary"):
+        return "urine"
+    elif specimen in ("stool", "fecal", "faecal", "feces"):
+        return "stool"
+    elif specimen == "wound":
+        return "wound"
+    elif specimen == "blood":
+        return "blood"
+
+    return specimen
 
 
 def _is_contamination(organism: str) -> bool:
     """Return True if the organism name matches any contamination term."""
     lower = organism.lower()
     return any(term in lower for term in RULES["contamination_terms"])
+
+
+# ---------------------------------------------------------------------------
+# Debug helper
+# ---------------------------------------------------------------------------
+
+
+def debug_extraction(report_text: str, label: str = "Report") -> dict:
+    """
+    Debug helper to show what was extracted from a report.
+
+    Returns a dictionary with all extraction results for debugging.
+    """
+    processed_text = (
+        _process_with_docling(report_text)
+        if Path(report_text).exists()
+        else report_text
+    )
+
+    organism = _parse_organism(processed_text)
+    cfu, cfu_ok = _parse_cfu(processed_text)
+    specimen = _parse_specimen(processed_text)
+    date = _parse_date(processed_text)
+    resistance = _parse_resistance_markers(processed_text)
+
+    return {
+        "label": label,
+        "organism": organism,
+        "cfu": cfu,
+        "cfu_ok": cfu_ok,
+        "specimen": specimen,
+        "date": date,
+        "resistance": resistance,
+        "is_contamination": _is_contamination(organism) if organism else False,
+        "processed_text_preview": processed_text[:500] + "..."
+        if len(processed_text) > 500
+        else processed_text,
+    }
 
 
 # ---------------------------------------------------------------------------

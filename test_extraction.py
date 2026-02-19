@@ -4,7 +4,8 @@ Kaggle-native inline tests (no pytest dependency).
 """
 
 import warnings
-from extraction import extract_structured_data, ExtractionError
+
+from extraction import ExtractionError, extract_structured_data
 
 _PASS = 0
 _FAIL = 0
@@ -177,6 +178,172 @@ _assert(r7.date == "2026-01-15", f"date normalised to ISO  (got '{r7.date}')")
 _assert(
     r7.specimen_type == "stool", f"specimen_type == 'stool'  (got '{r7.specimen_type}')"
 )
+
+# ---------------------------------------------------------------------------
+# Test — Flexible specimen detection (alternate formats)
+# ---------------------------------------------------------------------------
+REPORT_SPECIMEN_FLEX1 = """
+URINE CULTURE
+Date: 2026-05-01
+Organism: E. coli
+CFU/mL: 80,000
+"""
+
+print("\n=== Test: Flexible Specimen Detection (Urine Culture title) ===")
+r8 = extract_structured_data(REPORT_SPECIMEN_FLEX1)
+_assert(
+    r8.specimen_type == "urine",
+    f"specimen_type detected as 'urine' from title  (got '{r8.specimen_type}')",
+)
+
+REPORT_SPECIMEN_FLEX2 = """
+Specimen Type: Stool
+Date: 2026-05-10
+Organism: mixed flora
+CFU/mL: 2,000
+"""
+
+print("\n=== Test: Flexible Specimen Detection (Specimen Type: Stool) ===")
+r9 = extract_structured_data(REPORT_SPECIMEN_FLEX2)
+_assert(
+    r9.specimen_type == "stool",
+    f"specimen_type detected as 'stool'  (got '{r9.specimen_type}')",
+)
+
+# ---------------------------------------------------------------------------
+# Test — Flexible organism detection (alternate formats)
+# ---------------------------------------------------------------------------
+REPORT_ORG_FLEX1 = """
+Specimen: Urine
+Date: 2026-06-01
+ORGANISM: Klebsiella pneumoniae
+CFU/mL: 50,000
+"""
+
+print("\n=== Test: Flexible Organism Detection (ORGANISM: caps) ===")
+r10 = extract_structured_data(REPORT_ORG_FLEX1)
+_assert(
+    r10.organism == "Klebsiella pneumoniae",
+    f"organism detected from ORGANISM:  (got '{r10.organism}')",
+)
+
+REPORT_ORG_FLEX2 = """
+Specimen: Urine
+Date: 2026-06-15
+Isolated: E. coli
+CFU/mL: 150,000
+"""
+
+print("\n=== Test: Flexible Organism Detection (Isolated:) ===")
+r11 = extract_structured_data(REPORT_ORG_FLEX2)
+_assert(
+    r11.organism == "Escherichia coli",
+    f"organism detected from Isolated:  (got '{r11.organism}')",
+)
+
+# ---------------------------------------------------------------------------
+# Test — Flexible CFU detection (alternate formats)
+# ---------------------------------------------------------------------------
+REPORT_CFU_FLEX1 = """
+Specimen: Urine
+Date: 2026-07-01
+Organism: E. coli
+Result: >100,000 CFU/mL
+"""
+
+print("\n=== Test: Flexible CFU Detection (>100,000 format) ===")
+r12 = extract_structured_data(REPORT_CFU_FLEX1)
+_assert(
+    r12.cfu == 100000,
+    f"cfu parsed from >100,000 format  (got {r12.cfu})",
+)
+
+REPORT_CFU_FLEX2 = """
+Specimen: Urine
+Date: 2026-07-15
+Organism: Enterococcus faecalis
+Count: 75,000 colonies per mL
+"""
+
+print("\n=== Test: Flexible CFU Detection (Count: + colonies) ===")
+r13 = extract_structured_data(REPORT_CFU_FLEX2)
+_assert(
+    r13.cfu == 75000,
+    f"cfu parsed from Count: format  (got {r13.cfu})",
+)
+
+# ---------------------------------------------------------------------------
+# Test — Flexible date detection (alternate formats)
+# ---------------------------------------------------------------------------
+REPORT_DATE_FLEX1 = """
+Specimen: Urine
+Collection Date: 03/25/2026
+Organism: E. coli
+CFU/mL: 100,000
+"""
+
+print("\n=== Test: Flexible Date Detection (Collection Date MM/DD/YYYY) ===")
+r14 = extract_structured_data(REPORT_DATE_FLEX1)
+_assert(
+    r14.date == "2026-03-25",
+    f"date parsed from Collection Date:  (got '{r14.date}')",
+)
+
+REPORT_DATE_FLEX2 = """
+Specimen: Urine
+Date: 07-04-2026
+Organism: E. coli
+CFU/mL: 100,000
+"""
+
+print("\n=== Test: Flexible Date Detection (MM-DD-YYYY format) ===")
+r15 = extract_structured_data(REPORT_DATE_FLEX2)
+_assert(
+    r15.date == "2026-07-04",
+    f"date parsed from MM-DD-YYYY format  (got '{r15.date}')",
+)
+
+# ---------------------------------------------------------------------------
+# Test — Keyword-based specimen detection (no explicit Specimen: line)
+# ---------------------------------------------------------------------------
+REPORT_KEYWORD_URINE = """
+URINE CULTURE REPORT
+Patient: John Doe
+Date: 2026-08-01
+
+MICROBIOLOGY RESULTS:
+E. coli isolated at 100,000 CFU/mL
+"""
+
+print("\n=== Test: Keyword Specimen Detection (URINE CULTURE) ===")
+r16 = extract_structured_data(REPORT_KEYWORD_URINE)
+_assert(
+    r16.specimen_type == "urine",
+    f"specimen_type detected via urine keyword  (got '{r16.specimen_type}')",
+)
+
+REPORT_KEYWORD_STOOL = """
+FECAL CULTURE
+Patient: Jane Smith
+Date: 2026-08-15
+
+Salmonella detected
+CFU/mL: 45,000
+"""
+
+print("\n=== Test: Keyword Specimen Detection (FECAL CULTURE) ===")
+try:
+    r17 = extract_structured_data(REPORT_KEYWORD_STOOL)
+    _assert(
+        r17.specimen_type == "stool",
+        f"specimen_type detected via fecal keyword  (got '{r17.specimen_type}')",
+    )
+    _assert(
+        r17.cfu == 45000,
+        f"cfu == 45000  (got {r17.cfu})",
+    )
+except ExtractionError as e:
+    _assert(False, f"Extraction failed for stool culture test: {e}")
 
 # ---------------------------------------------------------------------------
 # Summary
