@@ -177,77 +177,114 @@ def _build_html(
         f"<li>{q}</li>" for q in (patient_out.patient_questions or [])
     )
 
+    # ---- Resistance / stewardship ----
     resistance_html = ""
     if clinician_out.clinician_resistance_detail:
         resistance_html = f"""
-        <div style="background:#fff3cd;border-left:4px solid #ffc107;padding:10px;margin:8px 0;border-radius:4px;">
-          <strong>Resistance Timeline</strong>
-          <pre style="margin:4px 0;font-size:13px;">{clinician_out.clinician_resistance_detail}</pre>
+        <div style="background:#FDFAF7;border-left:3px solid #E8DDD6;padding:10px 14px;margin:10px 0;border-radius:3px;">
+          <p style="margin:0 0 4px 0;font-family:system-ui,sans-serif;font-size:0.8rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#7a6558;">Resistance Timeline</p>
+          <pre style="margin:0;font-size:12px;font-family:system-ui,monospace;color:#4a3728;white-space:pre-wrap;">{clinician_out.clinician_resistance_detail}</pre>
         </div>
         """
 
     stewardship_html = ""
     if clinician_out.clinician_stewardship_flag:
         stewardship_html = """
-        <div style="background:#f8d7da;border-left:4px solid #dc3545;padding:10px;margin:8px 0;border-radius:4px;">
-          <strong>⚠ Stewardship Alert:</strong> Emerging resistance detected.
-          Antimicrobial stewardship review recommended.
+        <div style="background:#fdf5f1;border-left:3px solid #C1622F;padding:10px 14px;margin:10px 0;border-radius:3px;">
+          <span style="font-family:system-ui,sans-serif;font-size:0.85rem;color:#C1622F;font-weight:600;">⚠ Stewardship Alert</span>
+          <p style="margin:4px 0 0 0;font-family:system-ui,sans-serif;font-size:0.82rem;color:#6b3320;">Emerging resistance detected — antimicrobial stewardship review recommended.</p>
         </div>
         """
 
+    # ---- Trajectory table ----
     traj = clinician_out.clinician_trajectory or {}
     traj_rows = "".join(
-        f"<tr><td style='padding:4px 8px;border:1px solid #dee2e6;font-weight:bold;'>{k}</td>"
-        f"<td style='padding:4px 8px;border:1px solid #dee2e6;'>{v}</td></tr>"
+        f"<tr>"
+        f"<td style='padding:5px 10px;border-bottom:1px solid #E8DDD6;border-right:1px solid #E8DDD6;"
+        f"font-family:system-ui,sans-serif;font-size:0.78rem;font-weight:600;color:#7a6558;"
+        f"text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;'>{k}</td>"
+        f"<td style='padding:5px 10px;border-bottom:1px solid #E8DDD6;"
+        f"font-family:system-ui,sans-serif;font-size:0.82rem;color:#3d2b1f;'>{v}</td>"
+        f"</tr>"
         for k, v in traj.items()
     )
 
-    confidence_pct = (
-        f"{clinician_out.clinician_confidence:.2f} "
-        f"({clinician_out.clinician_confidence * 100:.0f}%)"
-        if clinician_out.clinician_confidence is not None
-        else "N/A"
+    # ---- Confidence bar ----
+    conf_val = clinician_out.clinician_confidence
+    conf_pct_num = int((conf_val or 0) * 100)
+    conf_label = (
+        f"{conf_val:.0%}" if conf_val is not None else "N/A"
+    )
+    conf_bar_html = f"""
+    <div style="margin:12px 0 16px;">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:5px;">
+        <span style="font-family:system-ui,sans-serif;font-size:0.78rem;font-weight:600;color:#7a6558;text-transform:uppercase;letter-spacing:.04em;">Confidence</span>
+        <span style="font-family:'Playfair Display',serif;font-size:1.15rem;font-weight:700;color:#C1622F;">{conf_label}</span>
+      </div>
+      <div style="height:5px;border-radius:3px;background:#E8DDD6;overflow:hidden;">
+        <div style="height:100%;width:{conf_pct_num}%;background:#C1622F;border-radius:3px;"></div>
+      </div>
+    </div>
+    """
+
+    # ---- Google Fonts import ----
+    font_import = (
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        '<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&'
+        'family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">'
     )
 
     html = f"""
-    <div style="font-family:'Crimson Pro', serif;max-width:900px;margin:auto;color:#3d2b1f;">
-      <h2 style="text-align:center;color:#d35400;border-bottom:2px solid #e67e22;padding-bottom:8px;font-variant:small-caps;">
-        CultureSense — {scenario_name}
-      </h2>
+    {font_import}
+    <div style="font-family:'Lora',serif;max-width:860px;margin:auto;color:#3d2b1f;background:#FDFAF7;padding:28px 32px;border:1px solid #E8DDD6;border-radius:4px;">
+
+      <!-- Page header -->
+      <div style="text-align:center;border-bottom:1px solid #E8DDD6;padding-bottom:16px;margin-bottom:24px;">
+        <h2 style="font-family:'Playfair Display',serif;font-weight:700;font-size:1.55rem;color:#C1622F;margin:0 0 4px 0;letter-spacing:.01em;">
+          CultureSense
+        </h2>
+        <p style="font-family:system-ui,sans-serif;font-size:0.8rem;color:#9a8578;margin:0;letter-spacing:.06em;text-transform:uppercase;">{scenario_name}</p>
+      </div>
 
       <!-- PATIENT MODE -->
-      <div style="background:#fffaf0;border-radius:12px;padding:20px;margin-bottom:20px;border:1px solid #fceec7;border-left:6px solid #f39c12;box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
-        <h3 style="color:#d35400;margin-top:0;font-variant:small-caps;">Patient Mode</h3>
-        <p style="font-size:1.1em;"><strong>Trend:</strong> Your results show <em>{patient_out.patient_trend_phrase}</em>.</p>
-        <div style="line-height:1.6;color:#5d4037;">
-          <strong>Summary:</strong><br>{(patient_out.patient_explanation or "").replace(chr(10), "<br>")}
+      <section style="margin-bottom:28px;padding-bottom:24px;border-bottom:1px solid #E8DDD6;">
+        <h3 style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;color:#C1622F;margin:0 0 14px 0;letter-spacing:.01em;border-left:3px solid #C1622F;padding-left:10px;">Patient Summary</h3>
+        <p style="font-size:1.0rem;line-height:1.7;margin:0 0 12px 0;"><em>Your results show <strong>{patient_out.patient_trend_phrase}</strong>.</em></p>
+        <div style="line-height:1.75;color:#4a3728;font-size:0.97rem;">
+          {(patient_out.patient_explanation or "").replace(chr(10), "<br>")}
         </div>
-        <p style="margin-top:15px;"><strong>Questions to ask your doctor:</strong></p>
-        <ul style="padding-left:20px;color:#5d4037;">{questions_html.replace('<li>', '<li style="margin-bottom:8px;">')}</ul>
-        <div style="background:#fff3cd;padding:12px;border-radius:6px;border-left:4px solid #ffc107;font-style:italic;font-size:0.9em;margin-top:20px;">
-          <strong>{patient_out.patient_disclaimer}</strong>
+        <p style="margin:16px 0 6px 0;font-family:system-ui,sans-serif;font-size:0.78rem;font-weight:600;color:#7a6558;text-transform:uppercase;letter-spacing:.05em;">Questions to ask your doctor</p>
+        <ul style="padding-left:18px;color:#4a3728;font-size:0.94rem;line-height:1.8;margin:0;">
+          {questions_html.replace('<li>', '<li style="margin-bottom:4px;">')}
+        </ul>
+        <div style="margin-top:18px;padding:10px 14px;border:1px solid #E8DDD6;border-radius:3px;background:#FDFAF7;">
+          <p style="font-family:system-ui,sans-serif;font-size:0.78rem;font-style:italic;color:#9a8578;margin:0;line-height:1.6;">{patient_out.patient_disclaimer}</p>
         </div>
-      </div>
+      </section>
 
       <!-- CLINICIAN MODE -->
-      <div style="background:#fefefe;border-radius:12px;padding:20px;border:1px solid #eee;border-left:6px solid #795548;box-shadow: 2px 2px 5px rgba(0,0,0,0.05);">
-        <h3 style="color:#5d4037;margin-top:0;font-variant:small-caps;">Clinician Mode</h3>
-        <p><strong>Confidence Score:</strong> <span style="font-size:1.2em;color:#e67e22;font-weight:bold;">{confidence_pct}</span></p>
+      <section>
+        <h3 style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;color:#C1622F;margin:0 0 14px 0;letter-spacing:.01em;border-left:3px solid #C1622F;padding-left:10px;">Clinical Interpretation</h3>
+        {conf_bar_html}
         {stewardship_html}
         {resistance_html}
-        <details style="margin-top:10px;border:1px solid #f5f5f5;border-radius:4px;padding:5px;">
-          <summary style="cursor:pointer;font-weight:bold;color:#795548;">View Trajectory Data</summary>
-          <table style="border-collapse:collapse;width:100%;margin-top:8px;font-size:13px;font-family:sans-serif;">
-            {traj_rows}
-          </table>
+        <details style="margin:12px 0;border:1px solid #E8DDD6;border-radius:3px;">
+          <summary style="cursor:pointer;padding:8px 12px;font-family:system-ui,sans-serif;font-size:0.8rem;font-weight:600;color:#7a6558;text-transform:uppercase;letter-spacing:.04em;list-style:none;user-select:none;">▸ Trajectory Data</summary>
+          <div style="padding:0 12px 12px;">
+            <table style="border-collapse:collapse;width:100%;margin-top:8px;border:1px solid #E8DDD6;">
+              {traj_rows}
+            </table>
+          </div>
         </details>
-        <p style="margin-top:15px;line-height:1.6;color:#3d2b1f;"><strong>Clinical Interpretation:</strong><br>
+        <div style="line-height:1.75;color:#3d2b1f;font-size:0.97rem;margin-top:14px;">
           {(clinician_out.clinician_interpretation or "").replace(chr(10), "<br>")}
-        </p>
-        <p style="font-style:italic;color:#8d6e63;border-top:1px solid #efebe9;padding-top:10px;margin-top:15px;font-size:0.85em;">
+        </div>
+        <p style="font-family:system-ui,sans-serif;font-style:italic;color:#9a8578;border-top:1px solid #E8DDD6;padding-top:12px;margin-top:20px;font-size:0.77rem;line-height:1.6;">
           {clinician_out.clinician_disclaimer}
         </p>
-      </div>
+      </section>
+
     </div>
     """
     return html

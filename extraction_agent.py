@@ -41,15 +41,17 @@ _WARN_PREFIX = "⚠ "
 WARM_CLINICAL_THEME = gr.themes.Soft(
     primary_hue="orange",
     neutral_hue="stone",
-    font=[gr.themes.GoogleFont("Crimson Pro"), "serif"],
-    font_mono=[gr.themes.GoogleFont("Fira Code"), "monospace"],
+    font=[gr.themes.GoogleFont("Source Serif 4"), "serif"],
+    font_mono=[gr.themes.GoogleFont("Source Code Pro"), "monospace"],
 ).set(
-    body_background_fill="#fdf9f3",  # Warm cream background
-    block_background_fill="#ffffff",
+    body_background_fill="#FDFAF7",  # Warm white
+    block_background_fill="#FDFAF7",
     block_border_width="1px",
-    block_title_text_font="Crimson Pro",
-    button_primary_background_fill="#e67e22",
-    button_primary_background_fill_hover="#d35400",
+    block_border_color="#E8DDD6",
+    block_title_text_font="'Playfair Display', serif",
+    button_primary_background_fill="#C1622F",
+    button_primary_background_fill_hover="#a85228",
+    button_primary_text_color="#FDFAF7",
 )
 
 
@@ -318,57 +320,105 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         return patient_out, clinician_out
 
     def format_output_html(patient_out, clinician_out) -> Tuple[str, str]:
-        """Convert FormattedOutput objects to display HTML with warm theme."""
-        # Patient card
-        p_lines = []
-        if patient_out.patient_explanation:
-            p_lines.append(f"<p style='color:#5d4037;'>{patient_out.patient_explanation}</p>")
+        """Convert FormattedOutput objects to display HTML — warm classical theme."""
+        # ── Patient card ───────────────────────────────────────────────────
+        p_body = ""
         if patient_out.patient_trend_phrase:
-            p_lines.append(f"<p><b>Trend:</b> <i style='color:#d35400;'>{patient_out.patient_trend_phrase}</i></p>")
+            p_body += (
+                f"<p style='font-size:1.0rem;line-height:1.7;margin:0 0 12px 0;'>"
+                f"<em>Your results show <strong>{patient_out.patient_trend_phrase}</strong>.</em></p>"
+            )
+        if patient_out.patient_explanation:
+            p_body += (
+                f"<div style='line-height:1.75;color:#4a3728;font-size:0.96rem;'>"
+                f"{patient_out.patient_explanation}</div>"
+            )
         if patient_out.patient_questions:
-            qs = "".join(f"<li style='margin-bottom:6px;'>{q}</li>" for q in patient_out.patient_questions)
-            p_lines.append(f"<ul style='color:#5d4037;'>{qs}</ul>")
+            qs = "".join(
+                f"<li style='margin-bottom:4px;'>{q}</li>"
+                for q in patient_out.patient_questions
+            )
+            p_body += (
+                "<p style='margin:14px 0 5px;font-family:system-ui,sans-serif;font-size:0.78rem;"
+                "font-weight:600;color:#7a6558;text-transform:uppercase;letter-spacing:.05em;'>"
+                "Questions to ask your doctor</p>"
+                f"<ul style='padding-left:18px;color:#4a3728;font-size:0.93rem;line-height:1.8;margin:0;'>{qs}</ul>"
+            )
         if patient_out.patient_disclaimer:
-            p_lines.append(
-                f'<p style="color:#8d6e63;font-size:0.85em;font-style:italic;margin-top:10px;">'
-                f'{patient_out.patient_disclaimer}</p>'
+            p_body += (
+                "<div style='margin-top:16px;padding:10px 14px;border:1px solid #E8DDD6;"
+                "border-radius:3px;background:#FDFAF7;'>"
+                f"<p style='font-family:system-ui,sans-serif;font-size:0.77rem;font-style:italic;"
+                f"color:#9a8578;margin:0;line-height:1.6;'>{patient_out.patient_disclaimer}</p>"
+                "</div>"
             )
         patient_html = (
-            '<div style="background:#fffaf0;border:1px solid #fceec7;padding:20px;border-radius:12px;'
-            'border-left:6px solid #f39c12;font-family:\'Crimson Pro\', serif;box-shadow:2px 2px 5px rgba(0,0,0,0.05);">'
-            '<h3 style="margin-top:0;color:#d35400;font-variant:small-caps;">🧑‍⚕️ Patient Summary</h3>'
-            + "".join(p_lines)
+            "<div style='font-family:\'Source Serif 4\',serif;background:#FDFAF7;border:1px solid #E8DDD6;"
+            "border-radius:4px;padding:22px 26px;box-shadow:0 1px 4px rgba(28,20,18,0.07);'>"
+            "<h3 style='font-family:\'Playfair Display\',serif;font-size:1.1rem;font-weight:600;"
+            "color:#C1622F;margin:0 0 14px;border-left:3px solid #C1622F;padding-left:10px;"
+            "letter-spacing:.01em;'>Patient Summary</h3>"
+            + p_body
             + "</div>"
         )
 
-        # Clinician card
-        c_lines = []
-        if clinician_out.clinician_interpretation:
-            c_lines.append(f"<p style='color:#3d2b1f;'>{clinician_out.clinician_interpretation}</p>")
-        if clinician_out.clinician_confidence is not None:
-            c_lines.append(
-                f"<p><b>Confidence:</b> <span style='font-size:1.1em;color:#e67e22;font-weight:bold;'>"
-                f"{clinician_out.clinician_confidence:.0%}</span></p>"
+        # ── Clinician card ─────────────────────────────────────────────────
+        # Confidence bar
+        conf_val = clinician_out.clinician_confidence
+        conf_pct_num = int((conf_val or 0) * 100)
+        conf_label = f"{conf_val:.0%}" if conf_val is not None else "N/A"
+        conf_bar = (
+            "<div style='margin:0 0 14px;'>"
+            "<div style='display:flex;align-items:baseline;gap:8px;margin-bottom:5px;'>"
+            "<span style='font-family:system-ui,sans-serif;font-size:0.78rem;font-weight:600;"
+            "color:#7a6558;text-transform:uppercase;letter-spacing:.04em;'>Confidence</span>"
+            f"<span style='font-family:\'Playfair Display\',serif;font-size:1.12rem;"
+            f"font-weight:700;color:#C1622F;'>{conf_label}</span>"
+            "</div>"
+            "<div style='height:5px;border-radius:3px;background:#E8DDD6;overflow:hidden;'>"
+            f"<div style='height:100%;width:{conf_pct_num}%;background:#C1622F;border-radius:3px;'></div>"
+            "</div></div>"
+        )
+        c_body = conf_bar
+        if clinician_out.clinician_stewardship_flag:
+            c_body += (
+                "<div style='background:#fdf5f1;border-left:3px solid #C1622F;"
+                "padding:10px 14px;margin:10px 0;border-radius:3px;'>"
+                "<span style='font-family:system-ui,sans-serif;font-size:0.84rem;"
+                "color:#C1622F;font-weight:600;'>⚠ Stewardship Alert</span>"
+                "<p style='margin:4px 0 0;font-family:system-ui,sans-serif;font-size:0.82rem;"
+                "color:#6b3320;'>Emerging resistance detected — antimicrobial stewardship review recommended.</p>"
+                "</div>"
             )
         if clinician_out.clinician_resistance_detail:
-            c_lines.append(
-                f"<div style='background:#fff3cd;padding:8px;border-radius:4px;border-left:4px solid #ffc107;font-size:0.9em;'>"
-                f"<b>Resistance Detail:</b><pre style='margin:4px 0;'>{clinician_out.clinician_resistance_detail}</pre></div>"
+            c_body += (
+                "<div style='background:#FDFAF7;border-left:3px solid #E8DDD6;"
+                "padding:10px 14px;margin:10px 0;border-radius:3px;'>"
+                "<p style='margin:0 0 4px;font-family:system-ui,sans-serif;font-size:0.78rem;"
+                "font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#7a6558;'>"
+                "Resistance Timeline</p>"
+                f"<pre style='margin:0;font-size:12px;font-family:system-ui,monospace;"
+                f"color:#4a3728;white-space:pre-wrap;'>{clinician_out.clinician_resistance_detail}</pre>"
+                "</div>"
             )
-        if clinician_out.clinician_stewardship_flag:
-            c_lines.append(
-                '<p style="color:#c0392b;font-weight:bold;margin-top:10px;">⚠ Stewardship Alert: Emerging resistance detected.</p>'
+        if clinician_out.clinician_interpretation:
+            c_body += (
+                f"<div style='line-height:1.75;color:#3d2b1f;font-size:0.96rem;margin-top:12px;'>"
+                f"{clinician_out.clinician_interpretation}</div>"
             )
         if clinician_out.clinician_disclaimer:
-            c_lines.append(
-                f'<p style="color:#8d6e63;font-size:0.8em;font-style:italic;margin-top:10px;border-top:1px solid #efebe9;padding-top:8px;">'
-                f'{clinician_out.clinician_disclaimer}</p>'
+            c_body += (
+                "<p style='font-family:system-ui,sans-serif;font-style:italic;color:#9a8578;"
+                "border-top:1px solid #E8DDD6;padding-top:10px;margin-top:18px;"
+                f"font-size:0.77rem;line-height:1.6;'>{clinician_out.clinician_disclaimer}</p>"
             )
         clinician_html = (
-            '<div style="background:#fefefe;border:1px solid #eee;padding:20px;border-radius:12px;'
-            'border-left:6px solid #795548;font-family:\'Crimson Pro\', serif;margin-top:16px;box-shadow:2px 2px 5px rgba(0,0,0,0.05);">'
-            '<h3 style="margin-top:0;color:#5d4037;font-variant:small-caps;">🔬 Clinical Interpretation</h3>'
-            + "".join(c_lines)
+            "<div style='font-family:\'Source Serif 4\',serif;background:#FDFAF7;border:1px solid #E8DDD6;"
+            "border-radius:4px;padding:22px 26px;margin-top:14px;box-shadow:0 1px 4px rgba(28,20,18,0.07);'>"
+            "<h3 style='font-family:\'Playfair Display\',serif;font-size:1.1rem;font-weight:600;"
+            "color:#C1622F;margin:0 0 14px;border-left:3px solid #C1622F;padding-left:10px;"
+            "letter-spacing:.01em;'>Clinical Interpretation</h3>"
+            + c_body
             + "</div>"
         )
 
@@ -379,16 +429,38 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         title="CultureSense — Longitudinal Clinical Hypothesis Engine",
         theme=WARM_CLINICAL_THEME,
         css="""
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap');
+
         .screen { padding: 8px 0; }
-        .status-box { font-size: 0.9em; line-height: 1.8; font-family: 'Crimson Pro', serif; }
-        .error-banner {
-            background: #fff5f5; border: 1px solid #feb2b2;
-            padding: 14px 18px; border-radius: 8px; margin: 12px 0;
-            color: #9b2c2c;
+        .status-box {
+            font-size: 0.85rem;
+            line-height: 1.8;
+            font-family: system-ui, sans-serif;
+            color: #4a3728;
         }
-        /* Ensure inputs still use sans-serif for clarity, while headers use serif */
-        input, textarea, select { font-family: sans-serif !important; }
-        .gr-button-primary { box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .error-banner {
+            background: #fdf5f1;
+            border: 1px solid #E8DDD6;
+            border-left: 3px solid #C1622F;
+            padding: 12px 16px;
+            border-radius: 3px;
+            margin: 10px 0;
+            color: #6b3320;
+            font-family: system-ui, sans-serif;
+            font-size: 0.85rem;
+        }
+        /* UI chrome: inputs, labels, buttons — system-ui at small size */
+        input, textarea, select, label, button {
+            font-family: system-ui, sans-serif !important;
+            font-size: 0.85rem !important;
+        }
+        /* Gradio tab labels */
+        .tab-nav button { font-family: system-ui, sans-serif !important; font-size: 0.82rem !important; }
+        /* Minimal shadows only */
+        .gr-box, .gr-panel { box-shadow: 0 1px 4px rgba(28,20,18,0.07) !important; }
+        .gr-button-primary { box-shadow: 0 1px 3px rgba(28,20,18,0.10) !important; }
+        /* Section headings rendered by Gradio Markdown use Playfair Display */
+        h1, h2, h3 { font-family: 'Playfair Display', serif !important; }
         """,
     ) as demo:
 
