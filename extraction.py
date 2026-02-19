@@ -96,7 +96,7 @@ _RE_CFU_RAW_NUMBER = re.compile(r"\b([\d]{5,})\b")  # bare large number (5+ digi
 
 # Date: Multiple patterns for various formats
 _RE_DATE_PRIMARY = re.compile(
-    r"(?:Date|Collected|Reported|Specimen\s+Date|Collection\s+Date)[\s:]+(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})",
+    r"(?:Date|Collected|Reported|Specimen\s+Date|Collection\s+Date|Date\s+Collected|Date\s+Reported)[\s:]*[\*_]*[\s:]+(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})",
     re.IGNORECASE,
 )
 _RE_DATE_ALT1 = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")  # ISO format anywhere
@@ -117,6 +117,11 @@ _RE_SPECIMEN_ALT1 = re.compile(
 _RE_SPECIMEN_ALT2 = re.compile(
     r"(?:culture|specimen|sample|test)\s*(?:type)?[\s:]+(urine|stool|wound|blood)",
     re.IGNORECASE,
+)
+# Match markdown headers and bold text: ## Urine Culture, **Urine Culture**, Urine Culture
+_RE_SPECIMEN_HEADER = re.compile(
+    r"(?:^#{1,3}\s*|\*{2}|\_{2}|##\s*)\s*(urine|stool|wound|blood|sputum)\s+culture\b",
+    re.IGNORECASE | re.MULTILINE,
 )
 _RE_SPECIMEN_URINE_KEYWORD = re.compile(
     r"\b(urine|urinary|bladder|catheter)\b", re.IGNORECASE
@@ -338,6 +343,11 @@ def _parse_specimen(report_text: str) -> str:
     Returns 'urine', 'stool', 'wound', 'blood', or 'unknown'.
     """
     text = report_text.strip()
+
+    # Try markdown headers and bold text: ## Urine Culture, **Urine Culture**
+    m = _RE_SPECIMEN_HEADER.search(text)
+    if m:
+        return _normalize_specimen(m.group(1).lower())
 
     # Try primary pattern: Specimen/Sample/Source/Type: urine/stool
     m = _RE_SPECIMEN_PRIMARY.search(text)
