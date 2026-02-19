@@ -10,22 +10,22 @@ Three-screen state machine:
 Tab B (manual entry) is the existing flow — zero modifications.
 """
 
-import os
-import tempfile
-import time
 import warnings
+import tempfile
+import os
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple, Optional
 
 import gradio as gr
 
 from data_models import CultureReport
-from extraction import ExtractionError, debug_extraction, extract_structured_data
+from extraction import extract_structured_data, ExtractionError
+from trend import analyze_trend
 from hypothesis import generate_hypothesis
 from medgemma import call_medgemma
-from renderer import render_clinician_output, render_patient_output
+from renderer import render_patient_output, render_clinician_output
 from rules import RULES
-from trend import analyze_trend
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -56,64 +56,147 @@ WARM_CLINICAL_THEME = gr.themes.Soft(
 
 
 # ---------------------------------------------------------------------------
-# 1. Docling PDF processor with enhanced error handling
+# 1. Docling PDF processor
 # ---------------------------------------------------------------------------
 
-
-def process_pdf_file(pdf_path: str) -> Tuple[str, str, str]:
+def process_pdf_file(pdf_path: str) -> Tuple[str, str]:
     """
     Parse a single PDF with Docling.
 
     Returns:
-        (markdown_text, status_html, debug_info)
-        - On success: (markdown, "", debug_info)
-        - On parse failure: ("", "<red status>", error_details)
+        (markdown_text, status_html)
+        - On success: (markdown, "")  — caller checks for culture data
+        - On parse failure: ("", "<red status>")
     """
-    debug_info = f"Processing: {Path(pdf_path).name}\n"
-
     try:
         from docling.document_converter import DocumentConverter
-
-        debug_info += "✓ Docling imported successfully\n"
-
         converter = DocumentConverter()
-        debug_info += "✓ DocumentConverter created\n"
-
-        start_time = time.time()
         result = converter.convert(pdf_path)
-        elapsed = time.time() - start_time
-        debug_info += f"✓ PDF converted in {elapsed:.1f}s\n"
-
         markdown_text = result.document.export_to_markdown()
-        debug_info += f"✓ Markdown exported ({len(markdown_text)} chars)\n"
-
-        # Preview first 500 chars for debugging
-        preview = markdown_text[:500].replace("\n", " ")
-        debug_info += f"Preview: {preview}...\n"
-
-        return markdown_text, "", debug_info
-
-    except ImportError as e:
-        error_msg = f"✗ Docling not installed: {e}"
-        debug_info += error_msg + "\n"
-        return (
-            "",
-            f'<span style="color:#c0392b">{error_msg}</span>',
-            debug_info,
-        )
+        return markdown_text, ""
     except Exception as e:
-        error_msg = f"✗ PDF processing failed: {type(e).__name__}: {str(e)[:100]}"
-        debug_info += error_msg + "\n"
         return (
             "",
-            f'<span style="color:#c0392b">{error_msg}</span>',
-            debug_info,
+            f'<span style="color:#c0392b">✗ Could not read this file — '
+            f'try a clearer scan or copy ({type(e).__name__})</span>',
         )
 
 
 # ---------------------------------------------------------------------------
-# 2. Multi-report splitter (unchanged)
+# 2. Multi-file orchestrator
 # ---------------------------------------------------------------------------
+
+def process_uploaded_pdfs(
+    files: List,
+) -> Tuple[List[CultureReport], List[str], List[str], str]:
+    """
+    Process a list of uploaded PDF file objects from gr.File.
+
+    Returns:
+        (reports, raw_text_blocks, per_file_statuses, truncation_warning)
+        - reports: deduplicated, sorted, max MAX_RECORDS CultureReport list
+        - raw_text_blocks: one markdown string per report (for clinician accordion)
+        - per_file_statuses: one HTML status string per uploaded file
+        - truncation_warning: non-empty string if records were truncated
+    """
+    if not files:
+        return [], [], [], ""
+
+    all_reports: List[CultureReport] = []
+    all_raw_blocks: List[str] = []
+    per_file_statuses: List[str] = []
+
+    for f in files:
+        # Gradio passes file objects with a .name attribute (temp path)
+        pdf_path = f.name if hasattr(f, "name") else str(f)
+        filename = Path(pdf_path).name
+
+        markdown_text, parse_error = process_pdf_file(pdf_path)
+
+        if parse_error:
+            per_file_statuses.append(
+                f'<div style="margin:4px 0"><b>{filename}</b> — {parse_error}</div>'
+            )
+            continue
+
+        # Try to extract culture records from the markdown
+        # extract_structured_data() handles one report block at a time.
+        # For multi-report PDFs, split on common section delimiters.
+        report_blocks = _split_into_report_blocks(markdown_text)
+        file_reports: List[CultureReport] = []
+
+        for block in report_blocks:
+            try:
+                report = extract_structured_data(block)
+                # Only keep urine/stool specimens
+                if report.specimen_type in ("urine", "stool"):
+                    # Override raw_text to the docling markdown block
+                    report = CultureReport(
+                        date=report.date,
+                        organism=report.organism,
+                        cfu=report.cfu,
+                        resistance_markers=report.resistance_markers,
+                        specimen_type=report.specimen_type,
+                        contamination_flag=report.contamination_flag,
+                        raw_text=block,  # stored for accordion; never forwarded to MedGemma
+                    )
+                    file_reports.append(report)
+            except ExtractionError:
+                pass  # block had no parseable culture data
+
+        if not file_reports:
+            per_file_statuses.append(
+                f'<div style="margin:4px 0"><b>{filename}</b> — '
+                f'<span style="color:#e67e22">⚠ No urine or stool culture data found in this file</span></div>'
+            )
+        else:
+            count = len(file_reports)
+            per_file_statuses.append(
+                f'<div style="margin:4px 0"><b>{filename}</b> — '
+                f'<span style="color:#27ae60">✓ {count} record{"s" if count != 1 else ""} found</span></div>'
+            )
+            all_reports.extend(file_reports)
+            all_raw_blocks.extend(r.raw_text for r in file_reports)
+
+    if not all_reports:
+        return [], [], per_file_statuses, ""
+
+    # Sort chronologically
+    combined = sorted(
+        zip(all_reports, all_raw_blocks), key=lambda pair: pair[0].date
+    )
+    all_reports = [p[0] for p in combined]
+    all_raw_blocks = [p[1] for p in combined]
+
+    # Deduplicate: same (date, organism, cfu) → keep first
+    seen: set = set()
+    deduped_reports: List[CultureReport] = []
+    deduped_blocks: List[str] = []
+    for report, block in zip(all_reports, all_raw_blocks):
+        key = (report.date, report.organism, report.cfu)
+        if key in seen:
+            warnings.warn(
+                f"Duplicate record skipped: {key}", UserWarning, stacklevel=2
+            )
+        else:
+            seen.add(key)
+            deduped_reports.append(report)
+            deduped_blocks.append(block)
+
+    # Truncate to MAX_RECORDS most recent
+    truncation_warning = ""
+    if len(deduped_reports) > MAX_RECORDS:
+        total = len(deduped_reports)
+        deduped_reports = deduped_reports[-MAX_RECORDS:]
+        deduped_blocks = deduped_blocks[-MAX_RECORDS:]
+        truncation_warning = (
+            f'<div style="background:#fff3cd;border:1px solid #ffc107;padding:8px 12px;'
+            f'border-radius:6px;margin-bottom:8px">'
+            f'⚠ {total} records were extracted. Only the {MAX_RECORDS} most recent are shown '
+            f'(the pipeline supports up to {MAX_RECORDS} reports).</div>'
+        )
+
+    return deduped_reports, deduped_blocks, per_file_statuses, truncation_warning
 
 
 def _split_into_report_blocks(markdown_text: str) -> List[str]:
@@ -139,239 +222,82 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
     return [markdown_text.strip()] if markdown_text.strip() else []
 
 
+# ---------------------------------------------------------------------------
+# 3. Confidence heuristic
+# ---------------------------------------------------------------------------
+
 def _is_low_confidence(report: CultureReport) -> bool:
-    """Return True if any field looks suspiciously generic."""
-    return (
-        report.organism == "unknown"
-        or report.date == "unknown"
-        or (report.cfu == 0 and "no growth" not in report.raw_text.lower())
+    """Return True if the extracted record has low confidence."""
+    return report.organism == "unknown" or (
+        report.cfu == 0 and report.organism != "unknown"
     )
 
 
 # ---------------------------------------------------------------------------
-# 3. DataFrame helpers (unchanged)
+# 4. Dataframe bridge
 # ---------------------------------------------------------------------------
 
-
-def reports_to_dataframe_rows(reports: List[CultureReport]) -> List[List[str]]:
-    """Convert CultureReport list to list of list strings for gr.Dataframe."""
+def reports_to_dataframe_rows(reports: List[CultureReport]) -> List[List]:
+    """Convert CultureReport list → list of rows for gr.Dataframe."""
     rows = []
     for r in reports:
-        warn = _WARN_PREFIX if _is_low_confidence(r) else ""
-        rows.append(
-            [
-                f"{warn}{r.date}",
-                r.specimen_type,
-                r.organism,
-                str(r.cfu),
-                ", ".join(r.resistance_markers) if r.resistance_markers else "—",
-            ]
-        )
+        resistance_str = ", ".join(r.resistance_markers) if r.resistance_markers else "None"
+        if _is_low_confidence(r):
+            # Prefix organism and resistance with warning indicator
+            organism_display = f"{_WARN_PREFIX}{r.organism}"
+        else:
+            organism_display = r.organism
+        rows.append([
+            r.date,
+            r.specimen_type,
+            organism_display,
+            str(r.cfu),
+            resistance_str,
+        ])
     return rows
 
 
-def dataframe_row_to_culture_report(row: List[str]) -> CultureReport:
-    """Convert a single Dataframe row (list of strings) back to CultureReport."""
-    date_str = row[0].replace(_WARN_PREFIX, "").strip()
-    specimen = row[1].strip()
-    organism = row[2].strip()
-    cfu_str = row[3].replace(",", "").strip()
-    resistance_str = row[4].strip()
+def dataframe_row_to_culture_report(row) -> CultureReport:
+    """
+    Convert an edited gr.Dataframe row back to a CultureReport.
+
+    CRITICAL: raw_text is always set to "" — never forwarded to MedGemma.
+    """
+    date = str(row[0]).strip()
+    specimen = str(row[1]).strip().lower()
+    organism = str(row[2]).strip().replace(_WARN_PREFIX, "")
+    cfu_raw = str(row[3]).replace(",", "").strip()
+    resistance_raw = str(row[4]).strip()
 
     try:
-        cfu = int(cfu_str)
+        cfu = int(cfu_raw)
     except ValueError:
         cfu = 0
 
-    resistance_markers = (
-        [m.strip() for m in resistance_str.split(",") if m.strip() != "—"]
-        if resistance_str != "—"
-        else []
+    resistance = [
+        m.strip().replace(_WARN_PREFIX, "")
+        for m in resistance_raw.split(",")
+        if m.strip() and m.strip().lower() != "none"
+    ]
+
+    contamination_flag = any(
+        term in organism.lower() for term in RULES["contamination_terms"]
     )
 
     return CultureReport(
-        date=date_str,
+        date=date,
         organism=organism,
         cfu=cfu,
-        resistance_markers=resistance_markers,
+        resistance_markers=resistance,
         specimen_type=specimen,
-        contamination_flag=any(
-            term in organism.lower() for term in RULES["contamination_terms"]
-        ),
-        raw_text="",  # Not needed for downstream pipeline
+        contamination_flag=contamination_flag,
+        raw_text="",  # SAFETY: never forwarded to MedGemma
     )
 
 
 # ---------------------------------------------------------------------------
-# 4. PDF batch processor with enhanced error handling and debug output
+# 5. Gradio UI builder
 # ---------------------------------------------------------------------------
-
-
-def process_uploaded_pdfs(
-    files: List,
-) -> Tuple[List[CultureReport], List[str], List[str], str, str]:
-    """
-    Process a list of uploaded PDF file objects from gr.File.
-
-    Returns:
-        (reports, raw_text_blocks, per_file_statuses, truncation_warning, debug_log)
-        - reports: deduplicated, sorted, max MAX_RECORDS CultureReport list
-        - raw_text_blocks: one markdown string per report (for clinician accordion)
-        - per_file_statuses: one HTML status string per uploaded file
-        - truncation_warning: non-empty string if records were truncated
-        - debug_log: detailed processing log for troubleshooting
-    """
-    debug_log = "=== PDF Processing Debug Log ===\n\n"
-
-    if not files:
-        debug_log += "No files provided\n"
-        return [], [], [], "", debug_log
-
-    all_reports: List[CultureReport] = []
-    all_raw_blocks: List[str] = []
-    per_file_statuses: List[str] = []
-
-    debug_log += f"Processing {len(files)} file(s)...\n\n"
-
-    for i, f in enumerate(files, 1):
-        # Gradio passes file objects with a .name attribute (temp path)
-        pdf_path = f.name if hasattr(f, "name") else str(f)
-        filename = Path(pdf_path).name
-
-        debug_log += f"--- File {i}/{len(files)}: {filename} ---\n"
-
-        markdown_text, parse_error, file_debug = process_pdf_file(pdf_path)
-        debug_log += file_debug
-
-        if parse_error:
-            per_file_statuses.append(
-                f'<div style="margin:4px 0"><b>{filename}</b> — {parse_error}</div>'
-            )
-            debug_log += f"✗ Skipped due to parse error\n\n"
-            continue
-
-        # Try to extract culture records from the markdown
-        # extract_structured_data() handles one report block at a time.
-        # For multi-report PDFs, split on common section delimiters.
-        report_blocks = _split_into_report_blocks(markdown_text)
-        debug_log += f"✓ Split into {len(report_blocks)} block(s)\n"
-
-        file_reports: List[CultureReport] = []
-
-        for block_idx, block in enumerate(report_blocks, 1):
-            debug_log += f"\n  Block {block_idx}:\n"
-            try:
-                # Debug extraction
-                debug_result = debug_extraction(block, f"Block {block_idx}")
-                debug_log += f"    Organism: {debug_result['organism']}\n"
-                debug_log += (
-                    f"    CFU: {debug_result['cfu']} (ok={debug_result['cfu_ok']})\n"
-                )
-                debug_log += f"    Specimen: {debug_result['specimen']}\n"
-                debug_log += f"    Date: {debug_result['date']}\n"
-
-                report = extract_structured_data(block)
-                debug_log += f"    ✓ Extraction successful\n"
-
-                # Only keep urine/stool specimens
-                if report.specimen_type in ("urine", "stool"):
-                    debug_log += (
-                        f"    ✓ Specimen type '{report.specimen_type}' accepted\n"
-                    )
-                    # Override raw_text to the docling markdown block
-                    report = CultureReport(
-                        date=report.date,
-                        organism=report.organism,
-                        cfu=report.cfu,
-                        resistance_markers=report.resistance_markers,
-                        specimen_type=report.specimen_type,
-                        contamination_flag=report.contamination_flag,
-                        raw_text=block,  # stored for accordion; never forwarded to MedGemma
-                    )
-                    file_reports.append(report)
-                else:
-                    debug_log += f"    ✗ Specimen type '{report.specimen_type}' rejected (not urine/stool)\n"
-
-            except ExtractionError as e:
-                debug_log += f"    ✗ ExtractionError: {e}\n"
-                pass  # block had no parseable culture data
-            except Exception as e:
-                debug_log += f"    ✗ Unexpected error: {type(e).__name__}: {e}\n"
-                pass
-
-        if not file_reports:
-            per_file_statuses.append(
-                f'<div style="margin:4px 0"><b>{filename}</b> — '
-                f'<span style="color:#e67e22">⚠ No urine or stool culture data found in this file</span></div>'
-            )
-            debug_log += f"\n✗ No valid culture records found in {filename}\n\n"
-        else:
-            count = len(file_reports)
-            per_file_statuses.append(
-                f'<div style="margin:4px 0"><b>{filename}</b> — '
-                f'<span style="color:#27ae60">✓ {count} record{"s" if count != 1 else ""} found</span></div>'
-            )
-            all_reports.extend(file_reports)
-            all_raw_blocks.extend(r.raw_text for r in file_reports)
-            debug_log += f"\n✓ Extracted {count} record(s) from {filename}\n\n"
-
-    if not all_reports:
-        debug_log += "=== RESULT: No valid reports found ===\n"
-        return [], [], per_file_statuses, "", debug_log
-
-    # Sort chronologically
-    debug_log += f"Sorting {len(all_reports)} report(s) chronologically...\n"
-    combined = sorted(zip(all_reports, all_raw_blocks), key=lambda pair: pair[0].date)
-    all_reports = [p[0] for p in combined]
-    all_raw_blocks = [p[1] for p in combined]
-
-    # Deduplicate: same (date, organism, cfu) → keep first
-    seen: set = set()
-    deduped_reports: List[CultureReport] = []
-    deduped_blocks: List[str] = []
-    for report, block in zip(all_reports, all_raw_blocks):
-        key = (report.date, report.organism, report.cfu)
-        if key in seen:
-            debug_log += f"⚠ Duplicate record skipped: {key}\n"
-            warnings.warn(f"Duplicate record skipped: {key}", UserWarning, stacklevel=2)
-        else:
-            seen.add(key)
-            deduped_reports.append(report)
-            deduped_blocks.append(block)
-
-    # Truncate to MAX_RECORDS most recent
-    truncation_warning = ""
-    if len(deduped_reports) > MAX_RECORDS:
-        total = len(deduped_reports)
-        deduped_reports = deduped_reports[-MAX_RECORDS:]
-        deduped_blocks = deduped_blocks[-MAX_RECORDS:]
-        truncation_warning = (
-            f'<div style="background:#fff3cd;border:1px solid #ffc107;padding:8px 12px;'
-            f'border-radius:6px;margin-bottom:8px">'
-            f"⚠ {total} records were extracted. Only the {MAX_RECORDS} most recent are shown "
-            f"(the pipeline supports up to {MAX_RECORDS} reports).</div>"
-        )
-        debug_log += f"⚠ Truncated from {total} to {MAX_RECORDS} most recent records\n"
-
-    debug_log += f"\n=== RESULT: Returning {len(deduped_reports)} report(s) ===\n"
-    for i, r in enumerate(deduped_reports, 1):
-        debug_log += (
-            f"  {i}. {r.date} | {r.specimen_type} | {r.organism} | {r.cfu} CFU\n"
-        )
-
-    return (
-        deduped_reports,
-        deduped_blocks,
-        per_file_statuses,
-        truncation_warning,
-        debug_log,
-    )
-
-
-# ---------------------------------------------------------------------------
-# 5. Gradio UI builder with loading indicators
-# ---------------------------------------------------------------------------
-
 
 def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
     """
@@ -387,12 +313,8 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         sorted_reports = sorted(reports, key=lambda r: r.date)
         trend = analyze_trend(sorted_reports)
         hypothesis = generate_hypothesis(trend, len(sorted_reports))
-        patient_response = call_medgemma(
-            trend, hypothesis, "patient", model, tokenizer, is_stub
-        )
-        clinician_response = call_medgemma(
-            trend, hypothesis, "clinician", model, tokenizer, is_stub
-        )
+        patient_response = call_medgemma(trend, hypothesis, "patient", model, tokenizer, is_stub)
+        clinician_response = call_medgemma(trend, hypothesis, "clinician", model, tokenizer, is_stub)
         patient_out = render_patient_output(trend, hypothesis, patient_response)
         clinician_out = render_clinician_output(trend, hypothesis, clinician_response)
         return patient_out, clinician_out
@@ -431,11 +353,13 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 "</div>"
             )
         patient_html = (
-            "<div style='font-family:'Source Serif 4',serif;background:#FDFAF7;border:1px solid #E8DDD6;"
+            "<div style='font-family:\'Source Serif 4\',serif;background:#FDFAF7;border:1px solid #E8DDD6;"
             "border-radius:4px;padding:22px 26px;box-shadow:0 1px 4px rgba(28,20,18,0.07);'>"
-            "<h3 style='font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;"
+            "<h3 style='font-family:\'Playfair Display\',serif;font-size:1.1rem;font-weight:600;"
             "color:#C1622F;margin:0 0 14px;border-left:3px solid #C1622F;padding-left:10px;"
-            "letter-spacing:.01em;'>Patient Summary</h3>" + p_body + "</div>"
+            "letter-spacing:.01em;'>Patient Summary</h3>"
+            + p_body
+            + "</div>"
         )
 
         # ── Clinician card ─────────────────────────────────────────────────
@@ -448,7 +372,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             "<div style='display:flex;align-items:baseline;gap:8px;margin-bottom:5px;'>"
             "<span style='font-family:system-ui,sans-serif;font-size:0.78rem;font-weight:600;"
             "color:#7a6558;text-transform:uppercase;letter-spacing:.04em;'>Confidence</span>"
-            f"<span style='font-family:'Playfair Display',serif;font-size:1.12rem;"
+            f"<span style='font-family:\'Playfair Display\',serif;font-size:1.12rem;"
             f"font-weight:700;color:#C1622F;'>{conf_label}</span>"
             "</div>"
             "<div style='height:5px;border-radius:3px;background:#E8DDD6;overflow:hidden;'>"
@@ -489,36 +413,70 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 f"font-size:0.77rem;line-height:1.6;'>{clinician_out.clinician_disclaimer}</p>"
             )
         clinician_html = (
-            "<div style='font-family:'Source Serif 4',serif;background:#FDFAF7;border:1px solid #E8DDD6;"
+            "<div style='font-family:\'Source Serif 4\',serif;background:#FDFAF7;border:1px solid #E8DDD6;"
             "border-radius:4px;padding:22px 26px;margin-top:14px;box-shadow:0 1px 4px rgba(28,20,18,0.07);'>"
-            "<h3 style='font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;"
+            "<h3 style='font-family:\'Playfair Display\',serif;font-size:1.1rem;font-weight:600;"
             "color:#C1622F;margin:0 0 14px;border-left:3px solid #C1622F;padding-left:10px;"
-            "letter-spacing:.01em;'>Clinical Interpretation</h3>" + c_body + "</div>"
+            "letter-spacing:.01em;'>Clinical Interpretation</h3>"
+            + c_body
+            + "</div>"
         )
 
         return patient_html, clinician_html
 
-    # ── Build UI ────────────────────────────────────────────────────────────
+    # ── Gradio Blocks ───────────────────────────────────────────────────────
     with gr.Blocks(
+        title="CultureSense — Longitudinal Clinical Hypothesis Engine",
         theme=WARM_CLINICAL_THEME,
         css="""
-        .screen { min-height: 60vh; }
-        .status-box { min-height: 40px; border: 1px solid #E8DDD6; border-radius: 4px; padding: 8px; background: #FDFAF7; }
-        .error-banner { background: #fdf5f1; border-left: 3px solid #C1622F; padding: 12px 16px; margin: 8px 0; border-radius: 3px; }
-        .loading-spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #E8DDD6; border-top: 3px solid #C1622F; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; vertical-align: middle; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    """,
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap');
+
+        .screen { padding: 8px 0; }
+        .status-box {
+            font-size: 0.85rem;
+            line-height: 1.8;
+            font-family: system-ui, sans-serif;
+            color: #4a3728;
+        }
+        .error-banner {
+            background: #fdf5f1;
+            border: 1px solid #E8DDD6;
+            border-left: 3px solid #C1622F;
+            padding: 12px 16px;
+            border-radius: 3px;
+            margin: 10px 0;
+            color: #6b3320;
+            font-family: system-ui, sans-serif;
+            font-size: 0.85rem;
+        }
+        /* UI chrome: inputs, labels, buttons — system-ui at small size */
+        input, textarea, select, label, button {
+            font-family: system-ui, sans-serif !important;
+            font-size: 0.85rem !important;
+        }
+        /* Gradio tab labels */
+        .tab-nav button { font-family: system-ui, sans-serif !important; font-size: 0.82rem !important; }
+        /* Minimal shadows only */
+        .gr-box, .gr-panel { box-shadow: 0 1px 4px rgba(28,20,18,0.07) !important; }
+        .gr-button-primary { box-shadow: 0 1px 3px rgba(28,20,18,0.10) !important; }
+        /* Section headings rendered by Gradio Markdown use Playfair Display */
+        h1, h2, h3 { font-family: 'Playfair Display', serif !important; }
+        """,
     ) as demo:
-        gr.Markdown("# 🧫 CultureSense — Longitudinal Clinical Hypothesis Engine")
+
         gr.Markdown(
-            "Upload 2–3 sequential urine or stool culture reports to generate a trend analysis and clinical hypothesis."
+            "# 🧫 CultureSense\n"
+            "**Longitudinal Clinical Hypothesis Engine** — powered by MedGemma\n\n"
+            "> Non-diagnostic. Always requires clinician review."
         )
 
         with gr.Tabs():
+
             # ================================================================
             # TAB A — Upload PDF (Extraction Agent)
             # ================================================================
             with gr.Tab("📄 Upload PDF", id="tab_upload"):
+
                 # ── State ───────────────────────────────────────────────────
                 state_reports = gr.State([])
                 state_raw_blocks = gr.State([])
@@ -535,26 +493,10 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         file_types=[".pdf"],
                         file_count="multiple",
                     )
-
-                    with gr.Row():
-                        btn_process = gr.Button("⚙ Process PDFs", variant="primary")
-                        btn_process_loading = gr.Button(
-                            "⏳ Processing...",
-                            variant="primary",
-                            interactive=False,
-                            visible=False,
-                        )
-
+                    btn_process = gr.Button("⚙ Process PDFs", variant="primary")
                     status_html = gr.HTML(
                         value="", label="File Status", elem_classes="status-box"
                     )
-
-                    # Loading indicator
-                    loading_html = gr.HTML(
-                        value="",
-                        visible=False,
-                    )
-
                     with gr.Column(visible=False) as all_failed_panel:
                         gr.HTML(
                             '<div class="error-banner">'
@@ -566,18 +508,6 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             btn_try_again = gr.Button("🔄 Try Again")
                             btn_to_manual_from_fail = gr.Button("✏ Enter Manually")
 
-                    # Debug output (collapsed by default)
-                    with gr.Accordion(
-                        "🔍 Debug Output (click to expand if processing fails)",
-                        open=False,
-                    ):
-                        debug_output = gr.Textbox(
-                            label="Processing Log",
-                            interactive=False,
-                            lines=20,
-                            value="",
-                        )
-
                 # ── Screen 2: Review & Confirm ──────────────────────────────
                 with gr.Column(visible=False, elem_classes="screen") as screen_confirm:
                     gr.Markdown("### Step 2 — Review & Confirm Extracted Records")
@@ -588,13 +518,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     truncation_warning_html = gr.HTML(value="")
 
                     confirm_table = gr.Dataframe(
-                        headers=[
-                            "Date",
-                            "Specimen",
-                            "Organism",
-                            "CFU/mL",
-                            "Resistance Markers",
-                        ],
+                        headers=["Date", "Specimen", "Organism", "CFU/mL", "Resistance Markers"],
                         datatype=["str", "str", "str", "str", "str"],
                         interactive=True,
                         wrap=True,
@@ -616,13 +540,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         )
 
                     with gr.Row():
-                        btn_confirm = gr.Button(
-                            "✅ Confirm & Analyse", variant="primary"
-                        )
+                        btn_confirm = gr.Button("✅ Confirm & Analyse", variant="primary")
                         btn_re_upload = gr.Button("↩ Edit & Re-upload")
-                        btn_to_manual_from_confirm = gr.Button(
-                            "✏ Enter Manually Instead"
-                        )
+                        btn_to_manual_from_confirm = gr.Button("✏ Enter Manually Instead")
 
                 # ── Screen 3: Analysis Output ───────────────────────────────
                 with gr.Column(visible=False, elem_classes="screen") as screen_output:
@@ -632,74 +552,32 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     btn_start_over = gr.Button("🔄 Start Over")
 
                 # ── Event: Process PDFs ─────────────────────────────────────
-                def on_process_pdfs_start(files):
-                    """Show loading state immediately when button is clicked."""
-                    if not files:
-                        return (
-                            gr.update(visible=True),  # btn_process
-                            gr.update(visible=False),  # btn_process_loading
-                            gr.update(
-                                value="<p style='color:#888'>No files uploaded.</p>",
-                                visible=True,
-                            ),
-                            gr.update(visible=False),  # loading_html
-                        )
-
-                    # Show loading state
-                    loading_msg = (
-                        '<div style="padding:12px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;">'
-                        '<span class="loading-spinner"></span>'
-                        "<strong>Processing PDFs...</strong> This may take 30-60 seconds per file. "
-                        "Docling is extracting text from your PDFs."
-                        "</div>"
-                    )
-
-                    return (
-                        gr.update(visible=False),  # btn_process
-                        gr.update(visible=True),  # btn_process_loading
-                        gr.update(value=loading_msg, visible=True),  # status_html
-                        gr.update(visible=True),  # loading_html
-                    )
-
                 def on_process_pdfs(files):
-                    """Actually process the PDFs after loading state is shown."""
                     if not files:
                         return (
-                            [],  # state_reports
-                            [],  # state_raw_blocks
+                            gr.update(),          # state_reports
+                            gr.update(),          # state_raw_blocks
                             "<p style='color:#888'>No files uploaded.</p>",  # status_html
-                            gr.update(visible=True),  # screen_upload
+                            gr.update(visible=True),   # screen_upload
                             gr.update(visible=False),  # screen_confirm
                             gr.update(visible=False),  # screen_output
                             gr.update(visible=False),  # all_failed_panel
-                            [],  # confirm_table
-                            "",  # truncation_warning_html
+                            [],                        # confirm_table
+                            "",                        # truncation_warning_html
                             gr.update(value="", visible=False),  # raw_box_0
                             gr.update(value="", visible=False),  # raw_box_1
                             gr.update(value="", visible=False),  # raw_box_2
-                            "",  # debug_output
-                            gr.update(visible=True),  # btn_process
-                            gr.update(visible=False),  # btn_process_loading
-                            gr.update(visible=False),  # loading_html
                         )
 
-                    reports, raw_blocks, statuses, trunc_warn, debug_log = (
-                        process_uploaded_pdfs(files)
-                    )
+                    reports, raw_blocks, statuses, trunc_warn = process_uploaded_pdfs(files)
                     status_combined = "".join(statuses)
 
                     if not reports:
                         # All files failed — stay on screen 1, show error panel
-                        error_msg = (
-                            '<div style="padding:12px;background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;color:#721c24;">'
-                            "<strong>✗ No valid culture data found</strong><br>"
-                            "Please check the debug output below for details."
-                            "</div>"
-                        )
                         return (
                             [],
                             [],
-                            error_msg,
+                            status_combined,
                             gr.update(visible=True),
                             gr.update(visible=False),
                             gr.update(visible=False),
@@ -709,10 +587,6 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             gr.update(value="", visible=False),
                             gr.update(value="", visible=False),
                             gr.update(value="", visible=False),
-                            debug_log,  # Show debug log
-                            gr.update(visible=True),  # btn_process
-                            gr.update(visible=False),  # btn_process_loading
-                            gr.update(visible=False),  # loading_html
                         )
 
                     # Build dataframe rows
@@ -725,7 +599,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             raw_updates.append(
                                 gr.update(
                                     value=raw_blocks[i],
-                                    label=f"Record {i + 1} — {reports[i].date}",
+                                    label=f"Record {i+1} — {reports[i].date}",
                                     visible=True,
                                 )
                             )
@@ -737,7 +611,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         raw_blocks,
                         status_combined,
                         gr.update(visible=False),  # hide screen_upload
-                        gr.update(visible=True),  # show screen_confirm
+                        gr.update(visible=True),   # show screen_confirm
                         gr.update(visible=False),  # hide screen_output
                         gr.update(visible=False),  # hide all_failed_panel
                         df_rows,
@@ -745,23 +619,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         raw_updates[0],
                         raw_updates[1],
                         raw_updates[2],
-                        debug_log,  # Store debug log
-                        gr.update(visible=True),  # btn_process
-                        gr.update(visible=False),  # btn_process_loading
-                        gr.update(visible=False),  # loading_html
                     )
 
-                # Chain the events: first show loading, then process
                 btn_process.click(
-                    fn=on_process_pdfs_start,
-                    inputs=[pdf_upload],
-                    outputs=[
-                        btn_process,
-                        btn_process_loading,
-                        status_html,
-                        loading_html,
-                    ],
-                ).then(
                     fn=on_process_pdfs,
                     inputs=[pdf_upload],
                     outputs=[
@@ -777,10 +637,6 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         raw_box_0,
                         raw_box_1,
                         raw_box_2,
-                        debug_output,
-                        btn_process,
-                        btn_process_loading,
-                        loading_html,
                     ],
                 )
 
@@ -799,9 +655,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     confirmed_reports = []
                     for row in table_data:
                         try:
-                            confirmed_reports.append(
-                                dataframe_row_to_culture_report(row)
-                            )
+                            confirmed_reports.append(dataframe_row_to_culture_report(row))
                         except Exception:
                             pass
 
@@ -816,19 +670,15 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
 
                     try:
                         patient_out, clinician_out = run_pipeline(confirmed_reports)
-                        patient_html, clinician_html = format_output_html(
-                            patient_out, clinician_out
-                        )
+                        patient_html, clinician_html = format_output_html(patient_out, clinician_out)
                     except Exception as e:
-                        patient_html = (
-                            f"<p style='color:#c0392b'>Analysis error: {e}</p>"
-                        )
+                        patient_html = f"<p style='color:#c0392b'>Analysis error: {e}</p>"
                         clinician_html = ""
 
                     return (
                         gr.update(visible=False),  # hide screen_confirm
                         gr.update(visible=False),  # hide screen_upload
-                        gr.update(visible=True),  # show screen_output
+                        gr.update(visible=True),   # show screen_output
                         patient_html,
                         clinician_html,
                     )
@@ -848,14 +698,13 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 # ── Event: Edit & Re-upload ─────────────────────────────────
                 def on_re_upload():
                     return (
-                        gr.update(visible=True),  # show screen_upload
+                        gr.update(visible=True),   # show screen_upload
                         gr.update(visible=False),  # hide screen_confirm
                         gr.update(visible=False),  # hide screen_output
                         gr.update(visible=False),  # hide all_failed_panel
-                        [],  # clear state_reports
-                        [],  # clear state_raw_blocks
-                        "",  # clear status_html
-                        "",  # clear debug_output
+                        [],                        # clear state_reports
+                        [],                        # clear state_raw_blocks
+                        "",                        # clear status_html
                     )
 
                 btn_re_upload.click(
@@ -869,38 +718,31 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         state_reports,
                         state_raw_blocks,
                         status_html,
-                        debug_output,
                     ],
                 )
 
-                # ── Event: Try Again (from fail panel) ──────────────────────
+                # ── Event: Try Again ────────────────────────────────────────
                 btn_try_again.click(
-                    fn=on_re_upload,
+                    fn=lambda: (
+                        gr.update(visible=False),
+                        "",
+                    ),
                     inputs=[],
-                    outputs=[
-                        screen_upload,
-                        screen_confirm,
-                        screen_output,
-                        all_failed_panel,
-                        state_reports,
-                        state_raw_blocks,
-                        status_html,
-                        debug_output,
-                    ],
+                    outputs=[all_failed_panel, status_html],
                 )
 
                 # ── Event: Start Over ───────────────────────────────────────
                 def on_start_over():
                     return (
-                        gr.update(visible=True),  # show screen_upload
-                        gr.update(visible=False),  # hide screen_confirm
-                        gr.update(visible=False),  # hide screen_output
-                        gr.update(visible=False),  # hide all_failed_panel
-                        [],  # clear state_reports
-                        [],  # clear state_raw_blocks
-                        "",  # clear status_html
-                        None,  # clear pdf_upload
-                        "",  # clear debug_output
+                        gr.update(visible=True),
+                        gr.update(visible=False),
+                        gr.update(visible=False),
+                        gr.update(visible=False),
+                        [],
+                        [],
+                        "",
+                        "",
+                        "",
                     )
 
                 btn_start_over.click(
@@ -914,105 +756,95 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         state_reports,
                         state_raw_blocks,
                         status_html,
-                        pdf_upload,
-                        debug_output,
-                    ],
-                )
-
-                # ── Event: Switch to Manual Entry ───────────────────────────
-                def switch_to_manual():
-                    return (
-                        gr.update(visible=False),  # hide upload screen
-                        gr.update(visible=False),  # hide confirm screen
-                        gr.update(visible=False),  # hide output screen
-                        gr.update(visible=False),  # hide fail panel
-                        gr.update(value="manual"),  # switch tab
-                    )
-
-                btn_to_manual_from_fail.click(
-                    fn=switch_to_manual,
-                    inputs=[],
-                    outputs=[
-                        screen_upload,
-                        screen_confirm,
-                        screen_output,
-                        all_failed_panel,
-                        gr.State("manual"),  # dummy, will be replaced by tab selection
-                    ],
-                )
-
-                btn_to_manual_from_confirm.click(
-                    fn=switch_to_manual,
-                    inputs=[],
-                    outputs=[
-                        screen_upload,
-                        screen_confirm,
-                        screen_output,
-                        all_failed_panel,
-                        gr.State("manual"),
+                        output_patient_html,
+                        output_clinician_html,
                     ],
                 )
 
             # ================================================================
-            # TAB B — Manual Entry (unchanged from original)
+            # TAB B — Enter Manually (existing flow — zero changes to pipeline)
             # ================================================================
             with gr.Tab("✏ Enter Manually", id="tab_manual"):
-                gr.Markdown("### Paste culture report text directly")
+                gr.Markdown("### Manual Entry")
                 gr.Markdown(
-                    "Paste 2–3 sequential culture reports. "
-                    "The pipeline will extract structured data, analyse trends, and generate hypotheses."
+                    "Paste each culture report into a separate text box below. "
+                    "The system will extract structured data and run the full analysis."
                 )
 
-                manual_input = gr.Textbox(
-                    label="Culture Reports (2–3 sequential)",
-                    placeholder="Paste report text here...",
-                    lines=12,
-                )
-                btn_analyse_manual = gr.Button("🔬 Analyse", variant="primary")
-                manual_output_patient = gr.HTML()
-                manual_output_clinician = gr.HTML()
+                with gr.Row():
+                    with gr.Column():
+                        report_1 = gr.Textbox(
+                            label="Culture Report 1 (required)",
+                            placeholder=(
+                                "Date: 2026-01-01\n"
+                                "Specimen: urine\n"
+                                "Organism: E. coli\n"
+                                "CFU/mL: 120,000\n"
+                                "Resistance: ESBL"
+                            ),
+                            lines=8,
+                        )
+                        report_2 = gr.Textbox(
+                            label="Culture Report 2 (required)",
+                            placeholder="Date: 2026-01-10\n...",
+                            lines=8,
+                        )
+                        report_3 = gr.Textbox(
+                            label="Culture Report 3 (optional)",
+                            placeholder="Date: 2026-01-20\n...",
+                            lines=8,
+                        )
 
-                def on_analyse_manual(text):
-                    if not text or len(text.strip()) < 20:
+                btn_analyse_manual = gr.Button("🔬 Analyse Reports", variant="primary")
+                manual_error = gr.HTML(value="")
+                manual_patient_html = gr.HTML(value="")
+                manual_clinician_html = gr.HTML(value="")
+
+                def on_analyse_manual(r1, r2, r3):
+                    texts = [t for t in [r1, r2, r3] if t and t.strip()]
+                    if len(texts) < 2:
                         return (
-                            "<p style='color:#c0392b'>Please paste at least one full report.</p>",
+                            "<p style='color:#c0392b'>Please enter at least 2 culture reports.</p>",
+                            "",
                             "",
                         )
 
-                    # Split by double newlines to get separate reports
-                    blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
                     reports = []
-                    for block in blocks:
+                    for text in texts:
                         try:
-                            r = extract_structured_data(block)
-                            reports.append(r)
-                        except Exception:
-                            pass
-
-                    if len(reports) < 1:
-                        return (
-                            "<p style='color:#c0392b'>Could not extract data from pasted text. "
-                            "Check format includes Date, Organism, and CFU/mL.</p>",
-                            "",
-                        )
+                            report = extract_structured_data(text)
+                            # Ensure raw_text is cleared before passing downstream
+                            reports.append(CultureReport(
+                                date=report.date,
+                                organism=report.organism,
+                                cfu=report.cfu,
+                                resistance_markers=report.resistance_markers,
+                                specimen_type=report.specimen_type,
+                                contamination_flag=report.contamination_flag,
+                                raw_text="",  # SAFETY: never forwarded to MedGemma
+                            ))
+                        except ExtractionError as e:
+                            return (
+                                f"<p style='color:#c0392b'>Extraction error: {e}</p>",
+                                "",
+                                "",
+                            )
 
                     try:
                         patient_out, clinician_out = run_pipeline(reports)
-                        patient_html, clinician_html = format_output_html(
-                            patient_out, clinician_out
-                        )
+                        patient_html, clinician_html = format_output_html(patient_out, clinician_out)
+                        return "", patient_html, clinician_html
                     except Exception as e:
-                        patient_html = (
-                            f"<p style='color:#c0392b'>Analysis error: {e}</p>"
+                        return (
+                            f"<p style='color:#c0392b'>Analysis error: {e}</p>",
+                            "",
+                            "",
                         )
-                        clinician_html = ""
-
-                    return patient_html, clinician_html
 
                 btn_analyse_manual.click(
                     fn=on_analyse_manual,
-                    inputs=[manual_input],
-                    outputs=[manual_output_patient, manual_output_clinician],
+                    inputs=[report_1, report_2, report_3],
+                    outputs=[manual_error, manual_patient_html, manual_clinician_html],
                 )
 
     return demo
