@@ -82,9 +82,11 @@ _RE_CFU_PRIMARY = re.compile(r"CFU[/\\]?m?L?:\s*([><]?\s*[\d,]+)", re.IGNORECASE
 _RE_CFU_ALT1 = re.compile(
     r"(?:Count|Quantity|Result):\s*([><]?\s*[\d,]+)", re.IGNORECASE
 )
-_RE_CFU_ALT2 = re.compile(r"([\d,]+)\s*(?:CFU|colonies|cells)", re.IGNORECASE)
+# Note: Negative lookbehind for "<", "&lt;", digits, or comma to avoid matching threshold values
+# like "<5,000 CFU/mL" or "&lt;5,000 CFU/mL" (HTML-escaped) or partial numbers like ",000"
+_RE_CFU_ALT2 = re.compile(r"(?<![<\d,;])(\d[\d,]*)\s*(?:CFU|colonies|cells)", re.IGNORECASE)
 _RE_CFU_ALT3 = re.compile(r">\s*?([\d,]+)", re.IGNORECASE)  # >100,000
-_RE_CFU_ALT4 = re.compile(r"(\d{2,3},\d{3})", re.IGNORECASE)  # 100,000 pattern
+_RE_CFU_ALT4 = re.compile(r"(\d{1,3},\d{3})", re.IGNORECASE)  # 5,000 or 100,000 pattern
 
 # Fallback CFU patterns
 _RE_CFU_SCIENTIFIC = re.compile(r"10\^(\d+)", re.IGNORECASE)  # 10^5 → 100000

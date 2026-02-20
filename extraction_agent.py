@@ -154,12 +154,10 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
             result.append(part)
         return result
 
-    # Try splitting on any H1/H2 heading as last resort
-    blocks = re.split(r"\n(?=#{1,2} )", markdown_text)
-    if len(blocks) > 1:
-        return [b.strip() for b in blocks if b.strip()]
-
-    # Single block
+    # Single block - do NOT split on arbitrary H1/H2 headers as they are
+    # section headers within a report (e.g., "## SPECIMEN INFORMATION", "## CULTURE RESULT")
+    # not report boundaries. Splitting on them breaks extraction of single reports
+    # that have multiple sections (like SetD which has CBC, metabolic panel, and urine culture).
     return [markdown_text.strip()] if markdown_text.strip() else []
 
 
@@ -710,11 +708,19 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     reports, raw_blocks, statuses, trunc_warn, debug_log = (
                         process_uploaded_pdfs(files)
                     )
-                    status_combined = "".join(statuses)
+                    # Add header showing total PDFs uploaded
+                    pdf_count = len(files) if files else 0
+                    status_header = (
+                        f'<div style="margin-bottom:8px;padding:8px 12px;background:#f0f0f0;'
+                        f'border-radius:4px;font-weight:500;">'
+                        f'📄 {pdf_count} PDF{"s" if pdf_count != 1 else ""} uploaded</div>'
+                    )
+                    status_combined = status_header + "".join(statuses)
 
                     if not reports:
                         # All files failed — stay on screen 1, show error panel
                         error_msg = (
+                            status_header +
                             '<div style="padding:12px;background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;color:#721c24;">'
                             "<strong>✗ No valid culture data found</strong><br>"
                             "Please check the debug output below for details."
