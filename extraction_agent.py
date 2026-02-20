@@ -53,11 +53,6 @@ WARM_CLINICAL_THEME = gr.themes.Default(
     button_primary_background_fill="*primary_500",
     button_primary_background_fill_hover="*primary_600",
     button_primary_text_color="white",
-    # Modern spacing and radius
-    block_radius="8px",
-    button_radius="6px",
-    input_radius="6px",
-    checkbox_radius="4px",
 )
 
 
