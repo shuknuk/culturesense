@@ -237,16 +237,37 @@ def _parse_cfu(report_text: str) -> tuple[int, bool]:
 
 def _parse_date(report_text: str) -> str:
     """Extract and normalise the collection date from report text."""
-    # Primary: prefixed dates
+    # Look for "Collected:" pattern first (most reliable indicator of collection date)
+    collected_pattern = re.compile(
+        r"Collected:\s*(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})",
+        re.IGNORECASE
+    )
+    m = collected_pattern.search(report_text)
+    if m:
+        raw = m.group(1)
+        return _normalize_date(raw)
+
+    # Primary: prefixed dates (Date:, Date Collected:, etc.)
     m = _RE_DATE_PRIMARY.search(report_text)
     if m:
         raw = m.group(1)
         return _normalize_date(raw)
 
-    # Alt1: ISO format anywhere
-    m = _RE_DATE_ALT1.search(report_text)
-    if m:
-        return m.group(1)
+    # Alt1: ISO format anywhere (but skip if it looks like a birth date)
+    all_dates = _RE_DATE_ALT1.findall(report_text)
+    if all_dates:
+        # If there's a DATE OF BIRTH field, try to exclude dates near it
+        if "DATE OF BIRTH" in report_text.upper():
+            # Find all ISO dates and their positions
+            for date in all_dates:
+                pos = report_text.find(date)
+                birth_pos = report_text.upper().find("DATE OF BIRTH")
+                # If date is far from DATE OF BIRTH, it's likely collection date
+                if abs(pos - birth_pos) > 50:
+                    return date
+            # If all dates are near birth date, return unknown
+            return "unknown"
+        return all_dates[0]
 
     # Alt2: MM/DD/YYYY anywhere
     m = _RE_DATE_ALT2.search(report_text)

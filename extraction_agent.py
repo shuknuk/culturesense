@@ -119,8 +119,9 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
     """
     Attempt to split a multi-report markdown document into individual report blocks.
 
-    Heuristic: split on "MICROBIOLOGY REPORT" headings or horizontal rules that
-    typically separate reports. Falls back to returning the whole text as one block.
+    Heuristic: split on "MICROBIOLOGY REPORT" headings, and attach the
+    "Collected:" date line to each block (since Docling may place it incorrectly).
+    Falls back to returning the whole text as one block.
     """
     import re
 
@@ -129,12 +130,34 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
     if len(blocks) > 1:
         return [b.strip() for b in blocks if b.strip()]
 
-    # Try splitting on MICROBIOLOGY REPORT headings (the actual report boundaries)
-    # This keeps date + organism + CFU together in each block
-    # Match: ## MICROBIOLOGY REPORT, ## MICROBIOLOGY REPORT - URINE CULTURE, etc.
-    blocks = re.split(r"\n(?=#{1,2}\s*MICROBIOLOGY\s+REPORT\b)", markdown_text, flags=re.IGNORECASE)
-    if len(blocks) > 1:
-        return [b.strip() for b in blocks if b.strip()]
+    # Find all "Collected:" dates in the original markdown
+    collected_dates = re.findall(
+        r"Collected:\s*(\d{4}-\d{2}-\d{2})",
+        markdown_text
+    )
+
+    # Try splitting on MICROBIOLOGY REPORT headings
+    pattern = r"\n(?=#{1,2}\s*MICROBIOLOGY\s+REPORT\b)"
+    parts = re.split(pattern, markdown_text, flags=re.IGNORECASE)
+
+    if len(parts) > 1:
+        result = []
+        # Skip the first part (header info)
+        for i in range(1, len(parts)):
+            part = parts[i].strip()
+            if not part:
+                continue
+
+            # Try to find the corresponding date from collected_dates
+            # Use the index to match with dates (offset by -1 since we start from part 1)
+            date_idx = i - 1
+            if date_idx < len(collected_dates):
+                # Prepend the collected date to the block
+                collected_date = collected_dates[date_idx]
+                part = f"Collected: {collected_date}\n\n" + part
+
+            result.append(part)
+        return result
 
     # Try splitting on any H1/H2 heading as last resort
     blocks = re.split(r"\n(?=#{1,2} )", markdown_text)
