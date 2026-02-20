@@ -119,22 +119,20 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
     """
     Attempt to split a multi-report markdown document into individual report blocks.
 
-    Heuristic: split on "MICROBIOLOGY REPORT" headings, and attach the
-    "Collected:" date line to each block (since Docling may place it incorrectly).
+    Heuristic: split on "MICROBIOLOGY REPORT" headings, then attach dates
+    in the order they appear in the markdown.
     Falls back to returning the whole text as one block.
     """
     import re
 
-    # Try splitting on "---" or "===" separators (common in lab report PDFs)
+    # Try splitting on "---" or "===" separators
     blocks = re.split(r"\n(?:---+|===+)\n", markdown_text)
     if len(blocks) > 1:
         return [b.strip() for b in blocks if b.strip()]
 
-    # Find all "Collected:" dates in the original markdown
-    collected_dates = re.findall(
-        r"Collected:\s*(\d{4}-\d{2}-\d{2})",
-        markdown_text
-    )
+    # Find all "Collected:" dates in order
+    collected_pattern = re.compile(r"Collected:\s*(\d{4}-\d{2}-\d{2})")
+    collected_dates = collected_pattern.findall(markdown_text)
 
     # Try splitting on MICROBIOLOGY REPORT headings
     pattern = r"\n(?=#{1,2}\s*MICROBIOLOGY\s+REPORT\b)"
@@ -148,13 +146,10 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
             if not part:
                 continue
 
-            # Try to find the corresponding date from collected_dates
-            # Use the index to match with dates (offset by -1 since we start from part 1)
+            # Assign date by index (in order of appearance)
             date_idx = i - 1
             if date_idx < len(collected_dates):
-                # Prepend the collected date to the block
-                collected_date = collected_dates[date_idx]
-                part = f"Collected: {collected_date}\n\n" + part
+                part = f"Collected: {collected_dates[date_idx]}\n\n" + part
 
             result.append(part)
         return result
