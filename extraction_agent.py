@@ -35,22 +35,29 @@ MAX_RECORDS = 3
 _WARN_PREFIX = "⚠ "
 
 # ---------------------------------------------------------------------------
-# Theme Definition — "Orange Design Theme, Warm Classical UI"
+# Theme Definition — Modern Clinical UI (Dark/Light Mode Compatible)
 # ---------------------------------------------------------------------------
 
-WARM_CLINICAL_THEME = gr.themes.Soft(
+WARM_CLINICAL_THEME = gr.themes.Default(
     primary_hue="orange",
-    neutral_hue="stone",
-    font=[gr.themes.GoogleFont("Source Serif 4"), "serif"],
-    font_mono=[gr.themes.GoogleFont("Source Code Pro"), "monospace"],
+    secondary_hue="slate",
+    neutral_hue="slate",
+    font=[gr.themes.GoogleFont("Inter"), "sans-serif"],
+    font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "monospace"],
 ).set(
-    body_background_fill="#FDFAF7",  # Warm white
-    block_background_fill="#FDFAF7",
+    # Use theme-aware colors
+    body_background_fill="*background_fill_primary",
+    block_background_fill="*background_fill_secondary",
     block_border_width="1px",
-    block_border_color="#E8DDD6",
-    button_primary_background_fill="#C1622F",
-    button_primary_background_fill_hover="#a85228",
-    button_primary_text_color="#FDFAF7",
+    block_border_color="*border_color_primary",
+    button_primary_background_fill="*primary_500",
+    button_primary_background_fill_hover="*primary_600",
+    button_primary_text_color="white",
+    # Modern spacing and radius
+    block_radius="8px",
+    button_radius="6px",
+    input_radius="6px",
+    checkbox_radius="4px",
 )
 
 
@@ -420,7 +427,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         return patient_out, clinician_out
 
     def format_output_html(patient_out, clinician_out) -> Tuple[str, str]:
-        """Convert FormattedOutput objects to display HTML — warm classical theme."""
+        """Convert FormattedOutput objects to display HTML — modern theme-aware styling."""
         # ── Patient card ───────────────────────────────────────────────────
         p_body = ""
         if patient_out.patient_trend_phrase:
@@ -430,7 +437,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             )
         if patient_out.patient_explanation:
             p_body += (
-                f"<div style='line-height:1.75;color:#4a3728;font-size:0.96rem;'>"
+                f"<div style='line-height:1.75;font-size:0.96rem;'>"
                 f"{patient_out.patient_explanation}</div>"
             )
         if patient_out.patient_questions:
@@ -439,83 +446,71 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 for q in patient_out.patient_questions
             )
             p_body += (
-                "<p style='margin:14px 0 5px;font-family:system-ui,sans-serif;font-size:0.78rem;"
-                "font-weight:600;color:#7a6558;text-transform:uppercase;letter-spacing:.05em;'>"
+                "<p style='margin:16px 0 8px;font-size:0.75rem;font-weight:600;"
+                "text-transform:uppercase;letter-spacing:0.05em;opacity:0.7;'>"
                 "Questions to ask your doctor</p>"
-                f"<ul style='padding-left:18px;color:#4a3728;font-size:0.93rem;line-height:1.8;margin:0;'>{qs}</ul>"
+                f"<ul style='padding-left:20px;font-size:0.93rem;line-height:1.8;margin:0;'>{qs}</ul>"
             )
         if patient_out.patient_disclaimer:
             p_body += (
-                "<div style='margin-top:16px;padding:10px 14px;border:1px solid #E8DDD6;"
-                "border-radius:3px;background:#FDFAF7;'>"
-                f"<p style='font-family:system-ui,sans-serif;font-size:0.77rem;font-style:italic;"
-                f"color:#9a8578;margin:0;line-height:1.6;'>{patient_out.patient_disclaimer}</p>"
-                "</div>"
+                "<div style='margin-top:16px;padding:12px 14px;border:1px solid var(--border-color-primary);"
+                "border-radius:6px;background:var(--background-fill-tertiary);'>"
+                f"<p style='font-size:0.77rem;font-style:italic;opacity:0.8;margin:0;line-height:1.6;'>"
+                f"{patient_out.patient_disclaimer}</p></div>"
             )
         patient_html = (
-            "<div style='font-family:'Source Serif 4',serif;background:#FDFAF7;border:1px solid #E8DDD6;"
-            "border-radius:4px;padding:22px 26px;box-shadow:0 1px 4px rgba(28,20,18,0.07);'>"
-            "<h3 style='font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;"
-            "color:#C1622F;margin:0 0 14px;border-left:3px solid #C1622F;padding-left:10px;"
-            "letter-spacing:.01em;'>Patient Summary</h3>" + p_body + "</div>"
+            "<div class='output-card'>"
+            "<h3>📋 Patient Summary</h3>" + p_body + "</div>"
         )
 
         # ── Clinician card ─────────────────────────────────────────────────
-        # Confidence bar
         conf_val = clinician_out.clinician_confidence
         conf_pct_num = int((conf_val or 0) * 100)
         conf_label = f"{conf_val:.0%}" if conf_val is not None else "N/A"
         conf_bar = (
-            "<div style='margin:0 0 14px;'>"
-            "<div style='display:flex;align-items:baseline;gap:8px;margin-bottom:5px;'>"
-            "<span style='font-family:system-ui,sans-serif;font-size:0.78rem;font-weight:600;"
-            "color:#7a6558;text-transform:uppercase;letter-spacing:.04em;'>Confidence</span>"
-            f"<span style='font-family:'Playfair Display',serif;font-size:1.12rem;"
-            f"font-weight:700;color:#C1622F;'>{conf_label}</span>"
+            "<div style='margin:0 0 16px;'>"
+            "<div style='display:flex;align-items:baseline;gap:8px;margin-bottom:6px;'>"
+            "<span style='font-size:0.75rem;font-weight:600;text-transform:uppercase;"
+            "letter-spacing:0.04em;opacity:0.7;'>Confidence</span>"
+            f"<span style='font-size:1.25rem;font-weight:700;color:var(--primary-500);'>{conf_label}</span>"
             "</div>"
-            "<div style='height:5px;border-radius:3px;background:#E8DDD6;overflow:hidden;'>"
-            f"<div style='height:100%;width:{conf_pct_num}%;background:#C1622F;border-radius:3px;'></div>"
+            "<div style='height:6px;border-radius:3px;background:var(--border-color-primary);overflow:hidden;'>"
+            f"<div style='height:100%;width:{conf_pct_num}%;background:var(--primary-500);border-radius:3px;'></div>"
             "</div></div>"
         )
         c_body = conf_bar
         if clinician_out.clinician_stewardship_flag:
             c_body += (
-                "<div style='background:#fdf5f1;border-left:3px solid #C1622F;"
-                "padding:10px 14px;margin:10px 0;border-radius:3px;'>"
-                "<span style='font-family:system-ui,sans-serif;font-size:0.84rem;"
-                "color:#C1622F;font-weight:600;'>⚠ Stewardship Alert</span>"
-                "<p style='margin:4px 0 0;font-family:system-ui,sans-serif;font-size:0.82rem;"
-                "color:#6b3320;'>Emerging resistance detected — antimicrobial stewardship review recommended.</p>"
+                "<div style='background:var(--color-orange-100);border-left:3px solid var(--color-orange-500);"
+                "padding:12px 14px;margin:12px 0;border-radius:6px;'>"
+                "<span style='font-size:0.85rem;font-weight:600;color:var(--color-orange-700);'>⚠ Stewardship Alert</span>"
+                "<p style='margin:4px 0 0;font-size:0.82rem;color:var(--color-orange-900);'>"
+                "Emerging resistance detected — antimicrobial stewardship review recommended.</p>"
                 "</div>"
             )
         if clinician_out.clinician_resistance_detail:
             c_body += (
-                "<div style='background:#FDFAF7;border-left:3px solid #E8DDD6;"
-                "padding:10px 14px;margin:10px 0;border-radius:3px;'>"
-                "<p style='margin:0 0 4px;font-family:system-ui,sans-serif;font-size:0.78rem;"
-                "font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#7a6558;'>"
-                "Resistance Timeline</p>"
-                f"<pre style='margin:0;font-size:12px;font-family:system-ui,monospace;"
-                f"color:#4a3728;white-space:pre-wrap;'>{clinician_out.clinician_resistance_detail}</pre>"
-                "</div>"
+                "<div style='background:var(--background-fill-tertiary);border-left:3px solid var(--primary-300);"
+                "padding:12px 14px;margin:12px 0;border-radius:6px;'>"
+                "<p style='margin:0 0 6px;font-size:0.75rem;font-weight:600;text-transform:uppercase;"
+                "letter-spacing:0.04em;opacity:0.7;'>Resistance Timeline</p>"
+                f"<pre style='margin:0;font-size:12px;font-family:var(--font-mono);white-space:pre-wrap;'>"
+                f"{clinician_out.clinician_resistance_detail}</pre></div>"
             )
         if clinician_out.clinician_interpretation:
             c_body += (
-                f"<div style='line-height:1.75;color:#3d2b1f;font-size:0.96rem;margin-top:12px;'>"
+                f"<div style='line-height:1.75;font-size:0.96rem;margin-top:12px;'>"
                 f"{clinician_out.clinician_interpretation}</div>"
             )
         if clinician_out.clinician_disclaimer:
             c_body += (
-                "<p style='font-family:system-ui,sans-serif;font-style:italic;color:#9a8578;"
-                "border-top:1px solid #E8DDD6;padding-top:10px;margin-top:18px;"
-                f"font-size:0.77rem;line-height:1.6;'>{clinician_out.clinician_disclaimer}</p>"
+                "<p style='font-style:italic;opacity:0.7;border-top:1px solid var(--border-color-primary);"
+                "padding-top:12px;margin-top:18px;font-size:0.77rem;line-height:1.6;'>"
+                f"{clinician_out.clinician_disclaimer}</p>"
             )
         clinician_html = (
-            "<div style='font-family:'Source Serif 4',serif;background:#FDFAF7;border:1px solid #E8DDD6;"
-            "border-radius:4px;padding:22px 26px;margin-top:14px;box-shadow:0 1px 4px rgba(28,20,18,0.07);'>"
-            "<h3 style='font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;"
-            "color:#C1622F;margin:0 0 14px;border-left:3px solid #C1622F;padding-left:10px;"
-            "letter-spacing:.01em;'>Clinical Interpretation</h3>" + c_body + "</div>"
+            "<div class='output-card'>"
+            "<h3>🩺 Clinical Interpretation</h3>" + c_body + "</div>"
         )
 
         return patient_html, clinician_html
@@ -524,11 +519,62 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
     with gr.Blocks(
         theme=WARM_CLINICAL_THEME,
         css="""
+        /* Modern, theme-aware styling */
         .screen { min-height: 60vh; }
-        .status-box { min-height: 40px; border: 1px solid #E8DDD6; border-radius: 4px; padding: 8px; background: #FDFAF7; }
-        .error-banner { background: #fdf5f1; border-left: 3px solid #C1622F; padding: 12px 16px; margin: 8px 0; border-radius: 3px; }
-        .loading-spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #E8DDD6; border-top: 3px solid #C1622F; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; vertical-align: middle; }
+
+        .status-box {
+            min-height: 40px;
+            border: 1px solid var(--border-color-primary);
+            border-radius: 8px;
+            padding: 12px;
+            background: var(--background-fill-secondary);
+        }
+
+        .error-banner {
+            background: var(--color-red-100);
+            border-left: 3px solid var(--color-red-500);
+            padding: 12px 16px;
+            margin: 8px 0;
+            border-radius: 6px;
+            color: var(--body-text-color);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid var(--border-color-primary);
+            border-top: 3px solid var(--primary-500);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Card styling for output */
+        .output-card {
+            border: 1px solid var(--border-color-primary);
+            border-radius: 8px;
+            padding: 20px;
+            background: var(--background-fill-secondary);
+            margin-bottom: 16px;
+        }
+
+        .output-card h3 {
+            margin: 0 0 12px 0;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--primary-600);
+            border-left: 3px solid var(--primary-500);
+            padding-left: 12px;
+        }
+
+        /* Dark mode specific adjustments */
+        .dark .status-box {
+            background: var(--background-fill-primary);
+        }
     """,
     ) as demo:
         gr.Markdown("# 🧫 CultureSense — Longitudinal Clinical Hypothesis Engine")
