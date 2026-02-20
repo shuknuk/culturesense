@@ -78,7 +78,26 @@ def strip_local_imports(source: str) -> str:
 
     remaining_lines = lines[i:]
 
+    # Track if we're inside a multi-line import with parentheses
+    in_parenthesized_import = False
+
     for line in remaining_lines:
+        stripped = line.strip()
+
+        # Track multi-line imports with parentheses
+        if in_parenthesized_import:
+            if ')' in stripped:
+                in_parenthesized_import = False
+            continue  # skip continuation lines
+
+        # Check if we just started a parenthesized import
+        if '(' in stripped and 'from' in stripped:
+            # Check if it's a local module import (handles "from X import (" and "from X import\n")
+            m_from = re.match(r"^\s*from\s+(\w+)\s+import", stripped)
+            if m_from and m_from.group(1) in LOCAL_MODULES:
+                in_parenthesized_import = True
+                continue
+
         # Handle backslash continuations from a previous stripped import
         if skip_continuation:
             if not line.rstrip().endswith("\\"):
