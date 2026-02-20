@@ -48,7 +48,6 @@ WARM_CLINICAL_THEME = gr.themes.Soft(
     block_background_fill="#FDFAF7",
     block_border_width="1px",
     block_border_color="#E8DDD6",
-    block_title_text_font="'Playfair Display', serif",
     button_primary_background_fill="#C1622F",
     button_primary_background_fill_hover="#a85228",
     button_primary_text_color="#FDFAF7",
