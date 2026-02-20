@@ -191,6 +191,7 @@ packages = [
     "accelerate>=0.29.0",
     "sentencepiece>=0.1.99",
     "huggingface_hub>=0.22.0",
+    "docling",
 ]
 
 for pkg in packages:
