@@ -119,7 +119,7 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
     """
     Attempt to split a multi-report markdown document into individual report blocks.
 
-    Heuristic: split on markdown H1/H2 headings or horizontal rules that
+    Heuristic: split on "MICROBIOLOGY REPORT" headings or horizontal rules that
     typically separate reports. Falls back to returning the whole text as one block.
     """
     import re
@@ -129,7 +129,14 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
     if len(blocks) > 1:
         return [b.strip() for b in blocks if b.strip()]
 
-    # Try splitting on H1/H2 headings
+    # Try splitting on MICROBIOLOGY REPORT headings (the actual report boundaries)
+    # This keeps date + organism + CFU together in each block
+    # Match: ## MICROBIOLOGY REPORT, ## MICROBIOLOGY REPORT - URINE CULTURE, etc.
+    blocks = re.split(r"\n(?=#{1,2}\s*MICROBIOLOGY\s+REPORT\b)", markdown_text, flags=re.IGNORECASE)
+    if len(blocks) > 1:
+        return [b.strip() for b in blocks if b.strip()]
+
+    # Try splitting on any H1/H2 heading as last resort
     blocks = re.split(r"\n(?=#{1,2} )", markdown_text)
     if len(blocks) > 1:
         return [b.strip() for b in blocks if b.strip()]
