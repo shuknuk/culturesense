@@ -181,18 +181,18 @@ def _build_html(
     resistance_html = ""
     if clinician_out.clinician_resistance_detail:
         resistance_html = f"""
-        <div style="background:#FDFAF7;border-left:3px solid #E8DDD6;padding:10px 14px;margin:10px 0;border-radius:3px;">
-          <p style="margin:0 0 4px 0;font-family:system-ui,sans-serif;font-size:0.8rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#7a6558;">Resistance Timeline</p>
-          <pre style="margin:0;font-size:12px;font-family:system-ui,monospace;color:#4a3728;white-space:pre-wrap;">{clinician_out.clinician_resistance_detail}</pre>
+        <div style="background:#F5F0EB;border-left:3px solid #E8DDD6;padding:10px 14px;margin:10px 0;border-radius:3px;">
+          <p style="margin:0 0 4px 0;font-family:system-ui,sans-serif;font-size:0.8rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#7A6558;">Resistance Timeline</p>
+          <pre style="margin:0;font-size:12px;font-family:system-ui,monospace;color:#4A3728;white-space:pre-wrap;">{clinician_out.clinician_resistance_detail}</pre>
         </div>
         """
 
     stewardship_html = ""
     if clinician_out.clinician_stewardship_flag:
         stewardship_html = """
-        <div style="background:#fdf5f1;border-left:3px solid #C1622F;padding:10px 14px;margin:10px 0;border-radius:3px;">
-          <span style="font-family:system-ui,sans-serif;font-size:0.85rem;color:#C1622F;font-weight:600;">⚠ Stewardship Alert</span>
-          <p style="margin:4px 0 0 0;font-family:system-ui,sans-serif;font-size:0.82rem;color:#6b3320;">Emerging resistance detected — antimicrobial stewardship review recommended.</p>
+        <div style="background:#FDF5F1;border-left:3px solid #C1622F;padding:10px 14px;margin:10px 0;border-radius:3px;">
+          <span style="font-family:system-ui,sans-serif;font-size:0.85rem;color:#C1622F;font-weight:600;">Stewardship Alert</span>
+          <p style="margin:4px 0 0 0;font-family:system-ui,sans-serif;font-size:0.82rem;color:#5D4037;">Emerging resistance detected — antimicrobial stewardship review recommended.</p>
         </div>
         """
 
@@ -201,10 +201,10 @@ def _build_html(
     traj_rows = "".join(
         f"<tr>"
         f"<td style='padding:5px 10px;border-bottom:1px solid #E8DDD6;border-right:1px solid #E8DDD6;"
-        f"font-family:system-ui,sans-serif;font-size:0.78rem;font-weight:600;color:#7a6558;"
+        f"font-family:'Source Serif 4',serif;font-size:0.78rem;font-weight:600;color:#7A6558;"
         f"text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;'>{k}</td>"
         f"<td style='padding:5px 10px;border-bottom:1px solid #E8DDD6;"
-        f"font-family:system-ui,sans-serif;font-size:0.82rem;color:#3d2b1f;'>{v}</td>"
+        f"font-family:'Source Serif 4',serif;font-size:0.82rem;color:#4A3728;'>{v}</td>"
         f"</tr>"
         for k, v in traj.items()
     )
@@ -231,35 +231,35 @@ def _build_html(
     font_import = (
         '<link rel="preconnect" href="https://fonts.googleapis.com">'
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-        '<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&'
-        'family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">'
+        '<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&'
+        'family=Source+Serif+4:ital,wght@0,400;0,500;1,400;1,500&display=swap" rel="stylesheet">'
     )
 
     html = f"""
     {font_import}
-    <div style="font-family:'Lora',serif;max-width:860px;margin:auto;color:#3d2b1f;background:#FDFAF7;padding:28px 32px;border:1px solid #E8DDD6;border-radius:4px;">
+    <div style="font-family:'Source Serif 4',serif;max-width:860px;margin:auto;color:#4A3728;background:#FDFAF7;padding:28px 32px;border:1px solid #E8DDD6;border-radius:4px;">
 
       <!-- Page header -->
       <div style="text-align:center;border-bottom:1px solid #E8DDD6;padding-bottom:16px;margin-bottom:24px;">
         <h2 style="font-family:'Playfair Display',serif;font-weight:700;font-size:1.55rem;color:#C1622F;margin:0 0 4px 0;letter-spacing:.01em;">
           CultureSense
         </h2>
-        <p style="font-family:system-ui,sans-serif;font-size:0.8rem;color:#9a8578;margin:0;letter-spacing:.06em;text-transform:uppercase;">{scenario_name}</p>
+        <p style="font-family:system-ui,sans-serif;font-size:0.8rem;color:#7A6558;margin:0;letter-spacing:.06em;text-transform:uppercase;">{scenario_name}</p>
       </div>
 
       <!-- PATIENT MODE -->
       <section style="margin-bottom:28px;padding-bottom:24px;border-bottom:1px solid #E8DDD6;">
         <h3 style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;color:#C1622F;margin:0 0 14px 0;letter-spacing:.01em;border-left:3px solid #C1622F;padding-left:10px;">Patient Summary</h3>
-        <p style="font-size:1.0rem;line-height:1.7;margin:0 0 12px 0;"><em>Your results show <strong>{patient_out.patient_trend_phrase}</strong>.</em></p>
-        <div style="line-height:1.75;color:#4a3728;font-size:0.97rem;">
+        <p style="font-size:1.0rem;line-height:1.75;margin:0 0 12px 0;"><em>Your results show <strong>{patient_out.patient_trend_phrase}</strong>.</em></p>
+        <div style="line-height:1.75;color:#4A3728;font-size:0.97rem;">
           {(patient_out.patient_explanation or "").replace(chr(10), "<br>")}
         </div>
-        <p style="margin:16px 0 6px 0;font-family:system-ui,sans-serif;font-size:0.78rem;font-weight:600;color:#7a6558;text-transform:uppercase;letter-spacing:.05em;">Questions to ask your doctor</p>
-        <ul style="padding-left:18px;color:#4a3728;font-size:0.94rem;line-height:1.8;margin:0;">
+        <p style="margin:16px 0 6px 0;font-family:system-ui,sans-serif;font-size:0.78rem;font-weight:600;color:#7A6558;text-transform:uppercase;letter-spacing:.05em;">Questions to ask your doctor</p>
+        <ul style="padding-left:18px;color:#4A3728;font-size:0.94rem;line-height:1.85;margin:0;">
           {questions_html.replace('<li>', '<li style="margin-bottom:4px;">')}
         </ul>
-        <div style="margin-top:18px;padding:10px 14px;border:1px solid #E8DDD6;border-radius:3px;background:#FDFAF7;">
-          <p style="font-family:system-ui,sans-serif;font-size:0.78rem;font-style:italic;color:#9a8578;margin:0;line-height:1.6;">{patient_out.patient_disclaimer}</p>
+        <div style="margin-top:18px;padding:10px 14px;border:1px solid #E8DDD6;border-radius:3px;background:#F5F0EB;">
+          <p style="font-family:system-ui,sans-serif;font-size:0.78rem;font-style:italic;color:#9A8578;margin:0;line-height:1.6;">{patient_out.patient_disclaimer}</p>
         </div>
       </section>
 
@@ -270,17 +270,17 @@ def _build_html(
         {stewardship_html}
         {resistance_html}
         <details style="margin:12px 0;border:1px solid #E8DDD6;border-radius:3px;">
-          <summary style="cursor:pointer;padding:8px 12px;font-family:system-ui,sans-serif;font-size:0.8rem;font-weight:600;color:#7a6558;text-transform:uppercase;letter-spacing:.04em;list-style:none;user-select:none;">▸ Trajectory Data</summary>
+          <summary style="cursor:pointer;padding:8px 12px;font-family:system-ui,sans-serif;font-size:0.8rem;font-weight:600;color:#7A6558;text-transform:uppercase;letter-spacing:.04em;list-style:none;user-select:none;">Trajectory Data</summary>
           <div style="padding:0 12px 12px;">
             <table style="border-collapse:collapse;width:100%;margin-top:8px;border:1px solid #E8DDD6;">
               {traj_rows}
             </table>
           </div>
         </details>
-        <div style="line-height:1.75;color:#3d2b1f;font-size:0.97rem;margin-top:14px;">
+        <div style="line-height:1.75;color:#4A3728;font-size:0.97rem;margin-top:14px;">
           {(clinician_out.clinician_interpretation or "").replace(chr(10), "<br>")}
         </div>
-        <p style="font-family:system-ui,sans-serif;font-style:italic;color:#9a8578;border-top:1px solid #E8DDD6;padding-top:12px;margin-top:20px;font-size:0.77rem;line-height:1.6;">
+        <p style="font-family:system-ui,sans-serif;font-style:italic;color:#7A6558;border-top:1px solid #E8DDD6;padding-top:12px;margin-top:20px;font-size:0.77rem;line-height:1.6;">
           {clinician_out.clinician_disclaimer}
         </p>
       </section>

@@ -47,22 +47,47 @@ WARM_CLINICAL_THEME = gr.themes.Soft(
     font=[gr.themes.GoogleFont("Source Serif 4"), "Georgia", "serif"],
     font_mono=[gr.themes.GoogleFont("Source Code Pro"), "monospace"],
 ).set(
-    # Warm white background
+    # Warm white background (main page background)
     body_background_fill="#FDFAF7",
     background_fill_primary="#FDFAF7",
     background_fill_secondary="#F5F0EB",
 
-    # Warm gray borders
+    # Warm gray borders (#E8DDD6)
     border_color_primary="#E8DDD6",
+    border_color_secondary="#E8DDD6",
     block_border_color="#E8DDD6",
+    input_border_color="#E8DDD6",
+    input_border_color_hover="#E8DDD6",
 
-    # Burnt sienna accent for buttons
+    # Burnt sienna accent for active elements
     button_primary_background_fill="#C1622F",
     button_primary_background_fill_hover="#a85228",
     button_primary_text_color="#FDFAF7",
+    button_secondary_background_fill="#E8DDD6",
+    button_secondary_text_color="#5D4037",
+    button_cancel_background_fill="#E8DDD6",
+    button_cancel_text_color="#5D4037",
 
-    # Subtle shadows only
+    # Form elements with warm gray styling
+    checkbox_label_background_fill="#FDFAF7",
+    checkbox_label_text_color="#5D4037",
+    checkbox_label_text_color_selected="#C1622F",
+    checkbox_border_color="#E8DDD6",
+    checkbox_border_color_focus="#C1622F",
+    checkbox_label_text_color_hover="#5D4037",
+
+    # Accordion styling
+    accordion_border_color="#E8DDD6",
+    accordion_border_radius="4px",
+    accordion_header_text_color="#C1622F",
+    accordion_header_text_color_hover="#a85228",
+
+    # Subtle shadows only (0 1px 4px with 7% opacity)
     block_shadow="0 1px 4px rgba(28,20,18,0.07)",
+    form_row_shadow="0 1px 4px rgba(28,20,18,0.07)",
+    button_shadow="0 1px 4px rgba(28,20,18,0.07)",
+    button_shadow_active="0 1px 2px rgba(28,20,18,0.1)",
+    button_shadow_hover="0 1px 4px rgba(28,20,18,0.07)",
 )
 
 
@@ -631,6 +656,122 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             padding-left: 10px;
             margin: 0 0 14px 0;
             letter-spacing: 0.01em;
+        }
+
+        /* Input fields - warm classical styling */
+        .gr-input {
+            border: 1px solid #E8DDD6;
+            border-radius: 4px;
+            background: #FDFAF7;
+            font-family: 'Source Serif 4', Georgia, serif;
+            font-size: 0.9rem;
+            color: #4A3728;
+        }
+        .gr-input:focus {
+            outline: none;
+            border-color: #C1622F;
+            box-shadow: 0 0 0 2px rgba(193, 98, 47, 0.1);
+        }
+
+        /* Buttons - warm classical styling */
+        .gr-button {
+            font-family: system-ui, sans-serif !important;
+            font-size: 0.8rem !important;
+            font-weight: 600 !important;
+            letter-spacing: 0.04em !important;
+            text-transform: uppercase !important;
+            border: 1px solid #E8DDD6 !important;
+            border-radius: 4px !important;
+            transition: all 0.2s ease !important;
+        }
+        .gr-button:hover {
+            border-color: #C1622F !important;
+        }
+        .gr-button.primary {
+            background: #C1622F !important;
+            border-color: #C1622F !important;
+            color: #FDFAF7 !important;
+        }
+        .gr-button.primary:hover {
+            background: #a85228 !important;
+            border-color: #a85228 !important;
+        }
+
+        /* Tabs - subtle warm styling */
+        .tabitem {
+            border: 1px solid #E8DDD6;
+            border-radius: 4px;
+            background: #FDFAF7;
+            box-shadow: 0 1px 4px rgba(28,20,18,0.07);
+        }
+        .tab-nav {
+            border-bottom: 1px solid #E8DDD6;
+            background: #F5F0EB;
+        }
+        .tab-nav button {
+            font-family: system-ui, sans-serif !important;
+            font-size: 0.8rem !important;
+            font-weight: 600 !important;
+            letter-spacing: 0.04em !important;
+            text-transform: uppercase !important;
+            border: none !important;
+            border-bottom: 2px solid transparent !important;
+            color: #7A6558 !important;
+            padding: 10px 16px !important;
+        }
+        .tab-nav button:hover {
+            color: #C1622F !important;
+            background: rgba(193, 98, 47, 0.05);
+        }
+        .tab-nav button.selected {
+            border-bottom-color: #C1622F !important;
+            color: #C1622F !important;
+        }
+
+        /* Dataframe - table styling */
+        .dataframe {
+            border: 1px solid #E8DDD6;
+            border-radius: 4px;
+            font-family: 'Source Serif 4', Georgia, serif;
+            font-size: 0.85rem;
+        }
+        .dataframe th {
+            background: #F5F0EB;
+            border-bottom: 1px solid #E8DDD6;
+            font-family: system-ui, sans-serif;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #7A6558;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .dataframe td {
+            border-bottom: 1px solid #E8DDD6;
+            color: #4A3728;
+        }
+        .dataframe input {
+            border: 1px solid #E8DDD6;
+            border-radius: 2px;
+            background: #FDFAF7;
+            font-family: 'Source Serif 4', Georgia, serif;
+        }
+
+        /* Accordion */
+        .accordion {
+            border: 1px solid #E8DDD6;
+            border-radius: 4px;
+            background: #FDFAF7;
+        }
+        .accordion-header {
+            font-family: system-ui, sans-serif !important;
+            font-size: 0.8rem !important;
+            font-weight: 600 !important;
+            color: #5D4037 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.04em !important;
+        }
+        .accordion-header:hover {
+            color: #C1622F !important;
         }
     """,
     ) as demo:
