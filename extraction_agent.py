@@ -35,24 +35,43 @@ MAX_RECORDS = 3
 _WARN_PREFIX = "⚠ "
 
 # ---------------------------------------------------------------------------
-# Theme Definition — Modern Clinical UI (Dark/Light Mode Compatible)
+# Theme Definition — Warm Classical Medical Journal Aesthetic
+# Base: warm white #FDFAF7 | Accent: burnt sienna #C1622F
+# Headings: Playfair Display | Body: Source Serif 4 | UI: system-ui
 # ---------------------------------------------------------------------------
 
-WARM_CLINICAL_THEME = gr.themes.Default(
+WARM_CLINICAL_THEME = gr.themes.Soft(
     primary_hue="orange",
-    secondary_hue="slate",
-    neutral_hue="slate",
-    font=[gr.themes.GoogleFont("Inter"), "sans-serif"],
-    font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "monospace"],
+    secondary_hue="stone",
+    neutral_hue="stone",
+    font=[gr.themes.GoogleFont("Source Serif 4"), "Georgia", "serif"],
+    font_mono=[gr.themes.GoogleFont("Source Code Pro"), "monospace"],
 ).set(
-    # Use theme-aware colors
-    body_background_fill="*background_fill_primary",
-    block_background_fill="*background_fill_secondary",
-    block_border_width="1px",
-    block_border_color="*border_color_primary",
-    button_primary_background_fill="*primary_500",
-    button_primary_background_fill_hover="*primary_600",
-    button_primary_text_color="white",
+    # Warm white background
+    body_background_fill="#FDFAF7",
+    body_background_fill_dark="#1a1816",
+    background_fill_primary="#FDFAF7",
+    background_fill_primary_dark="#1a1816",
+    background_fill_secondary="#F5F0EB",
+    background_fill_secondary_dark="#242220",
+    background_fill_tertiary="#EDE7E0",
+    background_fill_tertiary_dark="#2e2a27",
+
+    # Warm gray borders
+    border_color_primary="#E8DDD6",
+    border_color_primary_dark="#4a4440",
+    block_border_color="#E8DDD6",
+    block_border_color_dark="#4a4440",
+
+    # Burnt sienna accent for buttons
+    button_primary_background_fill="#C1622F",
+    button_primary_background_fill_hover="#a85228",
+    button_primary_background_fill_dark="#C1622F",
+    button_primary_text_color="#FDFAF7",
+
+    # Subtle shadows only
+    block_shadow="0 1px 4px rgba(28,20,18,0.07)",
+    block_radius="4px",
 )
 
 
@@ -422,7 +441,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         return patient_out, clinician_out
 
     def format_output_html(patient_out, clinician_out) -> Tuple[str, str]:
-        """Convert FormattedOutput objects to display HTML — modern theme-aware styling."""
+        """Convert FormattedOutput objects to display HTML — warm classical styling."""
         # ── Patient card ───────────────────────────────────────────────────
         p_body = ""
         if patient_out.patient_trend_phrase:
@@ -442,15 +461,15 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             )
             p_body += (
                 "<p style='margin:16px 0 8px;font-size:0.75rem;font-weight:600;"
-                "text-transform:uppercase;letter-spacing:0.05em;opacity:0.7;'>"
+                "text-transform:uppercase;letter-spacing:0.05em;color:#7A6558;'>"
                 "Questions to ask your doctor</p>"
                 f"<ul style='padding-left:20px;font-size:0.93rem;line-height:1.8;margin:0;'>{qs}</ul>"
             )
         if patient_out.patient_disclaimer:
             p_body += (
-                "<div style='margin-top:16px;padding:12px 14px;border:1px solid var(--border-color-primary);"
-                "border-radius:6px;background:var(--background-fill-tertiary);'>"
-                f"<p style='font-size:0.77rem;font-style:italic;opacity:0.8;margin:0;line-height:1.6;'>"
+                "<div style='margin-top:16px;padding:12px 14px;border:1px solid #E8DDD6;"
+                "border-radius:6px;background:#EDE7E0;'>"
+                f"<p style='font-size:0.77rem;font-style:italic;color:#5D4037;margin:0;line-height:1.6;'>"
                 f"{patient_out.patient_disclaimer}</p></div>"
             )
         patient_html = (
@@ -466,30 +485,30 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             "<div style='margin:0 0 16px;'>"
             "<div style='display:flex;align-items:baseline;gap:8px;margin-bottom:6px;'>"
             "<span style='font-size:0.75rem;font-weight:600;text-transform:uppercase;"
-            "letter-spacing:0.04em;opacity:0.7;'>Confidence</span>"
-            f"<span style='font-size:1.25rem;font-weight:700;color:var(--primary-500);'>{conf_label}</span>"
+            "letter-spacing:0.04em;color:#7A6558;'>Confidence</span>"
+            f"<span style='font-size:1.25rem;font-weight:700;color:#C1622F;'>{conf_label}</span>"
             "</div>"
-            "<div style='height:6px;border-radius:3px;background:var(--border-color-primary);overflow:hidden;'>"
-            f"<div style='height:100%;width:{conf_pct_num}%;background:var(--primary-500);border-radius:3px;'></div>"
+            "<div style='height:6px;border-radius:3px;background:#E8DDD6;overflow:hidden;'>"
+            f"<div style='height:100%;width:{conf_pct_num}%;background:#C1622F;border-radius:3px;'></div>"
             "</div></div>"
         )
         c_body = conf_bar
         if clinician_out.clinician_stewardship_flag:
             c_body += (
-                "<div style='background:var(--color-orange-100);border-left:3px solid var(--color-orange-500);"
+                "<div style='background:#FDF5F1;border-left:3px solid #C1622F;"
                 "padding:12px 14px;margin:12px 0;border-radius:6px;'>"
-                "<span style='font-size:0.85rem;font-weight:600;color:var(--color-orange-700);'>⚠ Stewardship Alert</span>"
-                "<p style='margin:4px 0 0;font-size:0.82rem;color:var(--color-orange-900);'>"
+                "<span style='font-size:0.85rem;font-weight:600;color:#8B4513;'>⚠ Stewardship Alert</span>"
+                "<p style='margin:4px 0 0;font-size:0.82rem;color:#5D4037;'>"
                 "Emerging resistance detected — antimicrobial stewardship review recommended.</p>"
                 "</div>"
             )
         if clinician_out.clinician_resistance_detail:
             c_body += (
-                "<div style='background:var(--background-fill-tertiary);border-left:3px solid var(--primary-300);"
+                "<div style='background:#EDE7E0;border-left:3px solid #D4A574;"
                 "padding:12px 14px;margin:12px 0;border-radius:6px;'>"
                 "<p style='margin:0 0 6px;font-size:0.75rem;font-weight:600;text-transform:uppercase;"
-                "letter-spacing:0.04em;opacity:0.7;'>Resistance Timeline</p>"
-                f"<pre style='margin:0;font-size:12px;font-family:var(--font-mono);white-space:pre-wrap;'>"
+                "letter-spacing:0.04em;color:#7A6558;'>Resistance Timeline</p>"
+                f"<pre style='margin:0;font-size:12px;font-family:\"Source Code Pro\",monospace;white-space:pre-wrap;color:#4A3728;'>"
                 f"{clinician_out.clinician_resistance_detail}</pre></div>"
             )
         if clinician_out.clinician_interpretation:
@@ -499,7 +518,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             )
         if clinician_out.clinician_disclaimer:
             c_body += (
-                "<p style='font-style:italic;opacity:0.7;border-top:1px solid var(--border-color-primary);"
+                "<p style='font-style:italic;color:#7A6558;border-top:1px solid #E8DDD6;"
                 "padding-top:12px;margin-top:18px;font-size:0.77rem;line-height:1.6;'>"
                 f"{clinician_out.clinician_disclaimer}</p>"
             )
@@ -514,61 +533,113 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
     with gr.Blocks(
         theme=WARM_CLINICAL_THEME,
         css="""
-        /* Modern, theme-aware styling */
+        /* Import Playfair Display for headings */
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&display=swap');
+
         .screen { min-height: 60vh; }
 
+        /* Status box - warm paper texture */
         .status-box {
             min-height: 40px;
-            border: 1px solid var(--border-color-primary);
-            border-radius: 8px;
-            padding: 12px;
-            background: var(--background-fill-secondary);
+            border: 1px solid #E8DDD6;
+            border-radius: 4px;
+            padding: 12px 16px;
+            background: #FDFAF7;
+            font-family: system-ui, sans-serif;
+            font-size: 0.875rem;
         }
 
+        /* Error banner - muted warm tones */
         .error-banner {
-            background: var(--color-red-100);
-            border-left: 3px solid var(--color-red-500);
+            background: #FDF5F1;
+            border-left: 3px solid #C1622F;
             padding: 12px 16px;
             margin: 8px 0;
-            border-radius: 6px;
-            color: var(--body-text-color);
+            border-radius: 4px;
+            color: #5D4037;
+            font-family: system-ui, sans-serif;
+            font-size: 0.875rem;
         }
 
+        /* Loading spinner */
         .loading-spinner {
             display: inline-block;
             width: 20px;
             height: 20px;
-            border: 3px solid var(--border-color-primary);
-            border-top: 3px solid var(--primary-500);
+            border: 2px solid #E8DDD6;
+            border-top: 2px solid #C1622F;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin-right: 8px;
             vertical-align: middle;
         }
-
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* Card styling for output */
+        /* Output cards - medical journal style */
         .output-card {
-            border: 1px solid var(--border-color-primary);
-            border-radius: 8px;
-            padding: 20px;
-            background: var(--background-fill-secondary);
+            border: 1px solid #E8DDD6;
+            border-radius: 4px;
+            padding: 22px 26px;
+            background: #FDFAF7;
             margin-bottom: 16px;
+            box-shadow: 0 1px 4px rgba(28,20,18,0.07);
+            font-family: 'Source Serif 4', Georgia, serif;
+            font-size: 0.96rem;
+            line-height: 1.75;
+            color: #4A3728;
         }
-
         .output-card h3 {
-            margin: 0 0 12px 0;
+            font-family: 'Playfair Display', Georgia, serif;
             font-size: 1.1rem;
             font-weight: 600;
-            color: var(--primary-600);
-            border-left: 3px solid var(--primary-500);
-            padding-left: 12px;
+            color: #C1622F;
+            margin: 0 0 14px 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #E8DDD6;
+            letter-spacing: 0.01em;
         }
 
-        /* Dark mode specific adjustments */
-        .dark .status-box {
-            background: var(--background-fill-primary);
+        /* PDF count header */
+        .pdf-count-header {
+            margin-bottom: 8px;
+            padding: 10px 14px;
+            background: #F5F0EB;
+            border-radius: 4px;
+            font-family: system-ui, sans-serif;
+            font-weight: 500;
+            font-size: 0.875rem;
+            color: #5D4037;
+        }
+
+        /* File status items */
+        .file-status {
+            padding: 6px 0;
+            border-bottom: 1px solid #EDE7E0;
+            font-family: system-ui, sans-serif;
+            font-size: 0.875rem;
+        }
+        .file-status:last-child { border-bottom: none; }
+
+        /* Labels and UI chrome */
+        label, .gradio-label {
+            font-family: system-ui, sans-serif !important;
+            font-size: 0.8rem !important;
+            font-weight: 500 !important;
+            color: #7A6558 !important;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        /* Section headings */
+        h3.section-heading {
+            font-family: 'Playfair Display', Georgia, serif;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #C1622F;
+            border-left: 3px solid #C1622F;
+            padding-left: 10px;
+            margin: 0 0 14px 0;
+            letter-spacing: 0.01em;
         }
     """,
     ) as demo:
