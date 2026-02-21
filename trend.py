@@ -6,7 +6,7 @@ Computes TrendResult from a sorted list of CultureReport objects.
 from typing import List
 
 from data_models import CultureReport, TrendResult
-from rules import RULES, normalize_organism
+from rules import RULES, ORGANISM_ALIASES
 
 
 # ---------------------------------------------------------------------------
@@ -57,15 +57,12 @@ def _compute_deltas(cfu_values: List[int]) -> List[int]:
     return [cfu_values[i + 1] - cfu_values[i] for i in range(len(cfu_values) - 1)]
 
 
-def _check_persistence(organism_list: List[str]) -> bool:
-    """
-    Return True if the same organism was isolated across all reports.
-
-    Comparison is performed on normalised (lowercase, stripped) organism names,
-    with alias resolution to handle "E. coli" == "Escherichia coli".
-    """
-    normalised = [normalize_organism(o).strip().lower() for o in organism_list]
-    return len(set(normalised)) == 1
+def check_persistence(organism_list: List[str]) -> bool:
+    normalized = [
+        ORGANISM_ALIASES.get(o.strip().lower(), o.strip().lower())
+        for o in organism_list
+    ]
+    return len(set(normalized)) == 1
 
 
 def _check_resistance_evolution(reports: List[CultureReport]) -> bool:
@@ -83,6 +80,17 @@ def _check_resistance_evolution(reports: List[CultureReport]) -> bool:
     for r in reports[1:]:
         later_markers.update(r.resistance_markers)
     return bool(later_markers - baseline)
+
+
+def _check_multi_drug_resistance(reports: List[CultureReport]) -> bool:
+    """
+    Return True if any single report has 3 or more resistance markers.
+
+    This indicates multi-drug resistant (MDR) organisms which require
+    specialized treatment considerations.
+    """
+    threshold = RULES.get("multi_drug_threshold", 3)
+    return any(len(r.resistance_markers) >= threshold for r in reports)
 
 
 def _build_resistance_timeline(reports: List[CultureReport]) -> List[List[str]]:
@@ -115,11 +123,13 @@ def analyze_trend(reports: List[CultureReport]) -> TrendResult:
     cfu_deltas = _compute_deltas(cfu_values)
     cfu_trend = _classify_cfu_trend(cfu_values)
     organism_list = [r.organism for r in reports]
-    organism_persistent = _check_persistence(organism_list)
+    organism_persistent = check_persistence(organism_list)
     resistance_evolution = _check_resistance_evolution(reports)
     resistance_timeline = _build_resistance_timeline(reports)
     report_dates = [r.date for r in reports]
+
     any_contamination = any(r.contamination_flag for r in reports)
+    multi_drug_resistance = _check_multi_drug_resistance(reports)
 
     return TrendResult(
         cfu_trend=cfu_trend,
@@ -131,4 +141,5 @@ def analyze_trend(reports: List[CultureReport]) -> TrendResult:
         resistance_timeline=resistance_timeline,
         report_dates=report_dates,
         any_contamination=any_contamination,
+        multi_drug_resistance=multi_drug_resistance,
     )

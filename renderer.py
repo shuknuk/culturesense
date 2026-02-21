@@ -11,6 +11,22 @@ from typing import Optional
 
 from data_models import TrendResult, HypothesisResult, FormattedOutput
 
+# Heatmap is optional - gracefully handle if matplotlib not available
+try:
+    from heatmap import generate_resistance_heatmap, get_heatmap_html
+    HEATMAP_AVAILABLE = True
+except ImportError:
+    HEATMAP_AVAILABLE = False
+    generate_resistance_heatmap = None
+    get_heatmap_html = None
+
+# Import heatmap module (optional - gracefully handles missing matplotlib)
+try:
+    from heatmap import generate_resistance_heatmap, get_heatmap_html
+    HEATMAP_AVAILABLE = True
+except ImportError:
+    HEATMAP_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # G-1: Renderer Constants (Section 9.2–9.4, 9.6)
 # ---------------------------------------------------------------------------
@@ -115,17 +131,63 @@ def render_clinician_output(
         "organism_persistent": trend.organism_persistent,
         "any_contamination": trend.any_contamination,
         "resistance_evolution": trend.resistance_evolution,
+        "multi_drug_resistance": trend.multi_drug_resistance,
     }
 
     # Build resistance detail only when resistance markers are present
     resistance_detail: Optional[str] = None
-    has_any_resistance = any(markers for markers in trend.resistance_timeline)
+
+    # Defensive: Handle case where data might be serialized through Gradio State
+    # Gradio may convert lists to Python literal strings (single quotes) not JSON
+    report_dates = trend.report_dates
+    resistance_timeline = trend.resistance_timeline
+
+    if isinstance(report_dates, str):
+        import json
+        import ast
+        try:
+            report_dates = json.loads(report_dates)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                report_dates = ast.literal_eval(report_dates)
+            except (ValueError, SyntaxError):
+                report_dates = []
+
+    if isinstance(resistance_timeline, str):
+        import json
+        import ast
+        try:
+            resistance_timeline = json.loads(resistance_timeline)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                resistance_timeline = ast.literal_eval(resistance_timeline)
+            except (ValueError, SyntaxError):
+                resistance_timeline = []
+
+    # Ensure they are lists
+    if not isinstance(report_dates, list):
+        report_dates = []
+    if not isinstance(resistance_timeline, list):
+        resistance_timeline = []
+
+    has_any_resistance = any(markers for markers in resistance_timeline)
     if has_any_resistance:
         lines = []
-        for date, markers in zip(trend.report_dates, trend.resistance_timeline):
+        for date, markers in zip(report_dates, resistance_timeline):
+            # Handle case where markers might be a string instead of list
+            if isinstance(markers, str):
+                markers = [markers] if markers else []
             marker_str = ", ".join(markers) if markers else "None"
             lines.append(f"  {date}: {marker_str}")
         resistance_detail = "Resistance Timeline:\n" + "\n".join(lines)
+
+    # Generate resistance heatmap if matplotlib is available
+    resistance_heatmap: Optional[str] = None
+    if has_any_resistance and generate_resistance_heatmap is not None:
+        resistance_heatmap = generate_resistance_heatmap(
+            trend.resistance_timeline,
+            trend.report_dates
+        )
 
     return FormattedOutput(
         mode="clinician",
@@ -133,6 +195,7 @@ def render_clinician_output(
         clinician_interpretation=medgemma_response,
         clinician_confidence=hypothesis.confidence,
         clinician_resistance_detail=resistance_detail,
+        clinician_resistance_heatmap=resistance_heatmap,
         clinician_stewardship_flag=hypothesis.stewardship_alert,
         clinician_disclaimer=CLINICIAN_DISCLAIMER,
     )

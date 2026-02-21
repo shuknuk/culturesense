@@ -30,6 +30,8 @@ RULES = {
     "max_confidence": 0.95,
     # Starting confidence before any signal adjustments
     "base_confidence": 0.50,
+    # Number of resistant antibiotics to flag as multi-drug resistance
+    "multi_drug_threshold": 3,
 }
 
 # ---------------------------------------------------------------------------
@@ -39,35 +41,35 @@ RULES = {
 # ---------------------------------------------------------------------------
 ORGANISM_ALIASES: dict = {
     # Escherichia coli variants
-    "e. coli": "Escherichia coli",
-    "e.coli": "Escherichia coli",
-    "e coli": "Escherichia coli",
-    "escherichia coli": "Escherichia coli",
+    "e. coli": "escherichia coli",
+    "e.coli": "escherichia coli",
+    "e coli": "escherichia coli",
+    "escherichia coli": "escherichia coli",
     # Klebsiella
-    "klebsiella": "Klebsiella pneumoniae",
-    "klebsiella pneumoniae": "Klebsiella pneumoniae",
+    "klebsiella": "klebsiella pneumoniae",
+    "klebsiella pneumoniae": "klebsiella pneumoniae",
     # Staphylococcus
-    "staph aureus": "Staphylococcus aureus",
-    "staphylococcus aureus": "Staphylococcus aureus",
-    "s. aureus": "Staphylococcus aureus",
-    "mrsa": "Staphylococcus aureus (MRSA)",
+    "staph aureus": "staphylococcus aureus",
+    "staphylococcus aureus": "staphylococcus aureus",
+    "s. aureus": "staphylococcus aureus",
+    "mrsa": "staphylococcus aureus (mrsa)",
     # Enterococcus
-    "enterococcus": "Enterococcus faecalis",
-    "enterococcus faecalis": "Enterococcus faecalis",
-    "e. faecalis": "Enterococcus faecalis",
+    "enterococcus": "enterococcus faecalis",
+    "enterococcus faecalis": "enterococcus faecalis",
+    "e. faecalis": "enterococcus faecalis",
     # Pseudomonas
-    "pseudomonas": "Pseudomonas aeruginosa",
-    "pseudomonas aeruginosa": "Pseudomonas aeruginosa",
-    "p. aeruginosa": "Pseudomonas aeruginosa",
+    "pseudomonas": "pseudomonas aeruginosa",
+    "pseudomonas aeruginosa": "pseudomonas aeruginosa",
+    "p. aeruginosa": "pseudomonas aeruginosa",
     # Proteus
-    "proteus": "Proteus mirabilis",
-    "proteus mirabilis": "Proteus mirabilis",
+    "proteus": "proteus mirabilis",
+    "proteus mirabilis": "proteus mirabilis",
     # Contamination terms (kept as-is but included for normalisation completeness)
     "mixed flora": "mixed flora",
-    "skin flora": "skin flora",
-    "normal flora": "normal flora",
+    "skin flora": "mixed flora",
+    "normal flora": "mixed flora",
     "commensal": "commensal",
-    "mixed growth": "mixed growth",
+    "mixed growth": "mixed flora",
 }
 
 
@@ -77,7 +79,7 @@ def normalize_organism(raw: str) -> str:
 
     Performs case-insensitive lookup against ORGANISM_ALIASES.
     Returns the canonical name if found, otherwise returns the stripped
-    title-cased version of the original input.
+    original input.
 
     Args:
         raw: Raw organism string from extraction layer.
@@ -86,4 +88,11 @@ def normalize_organism(raw: str) -> str:
         Canonical organism name string.
     """
     key = raw.strip().lower()
-    return ORGANISM_ALIASES.get(key, raw.strip())
+    canonical = ORGANISM_ALIASES.get(key, raw.strip())
+    # Contamination terms stay lowercase, others get first letter capitalized
+    if canonical in ("mixed flora", "skin flora", "normal flora", "commensal"):
+        return canonical
+    # Capitalize first letter only (e.g., "escherichia coli" -> "Escherichia coli")
+    if canonical:
+        return canonical[0].upper() + canonical[1:] if len(canonical) > 1 else canonical.upper()
+    return raw.strip()

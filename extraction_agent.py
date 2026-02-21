@@ -19,13 +19,82 @@ from typing import List, Optional, Tuple
 
 import gradio as gr
 
-from data_models import CultureReport
-from extraction import ExtractionError, debug_extraction, extract_structured_data
+from data_models import CultureReport, TrendResult
+from extraction import (
+    ExtractionError,
+    debug_extraction,
+    extract_structured_data,
+    extract_structured_data_with_fallback,
+)
 from hypothesis import generate_hypothesis
 from medgemma import call_medgemma
+from pii_removal import scrub_pii, detect_pii
 from renderer import render_clinician_output, render_patient_output
 from rules import RULES
 from trend import analyze_trend
+
+# ---------------------------------------------------------------------------
+# Resistance Timeline Renderer
+# ---------------------------------------------------------------------------
+
+def render_resistance_timeline(trend: TrendResult) -> str:
+    # Defensive: ensure resistance_timeline is List[List[str]]
+    timeline = trend.resistance_timeline
+    report_dates = trend.report_dates
+
+    # Handle case where data might be serialized/deserialized through Gradio State
+    # Gradio may convert lists to Python literal strings (single quotes) not JSON
+    if isinstance(timeline, str):
+        import json
+        import ast
+        try:
+            # Try JSON first (double quotes)
+            timeline = json.loads(timeline)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                # Try Python literal (single quotes)
+                timeline = ast.literal_eval(timeline)
+            except (ValueError, SyntaxError):
+                timeline = []
+
+    if isinstance(report_dates, str):
+        import json
+        import ast
+        try:
+            report_dates = json.loads(report_dates)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                report_dates = ast.literal_eval(report_dates)
+            except (ValueError, SyntaxError):
+                report_dates = []
+
+    # Ensure timeline is a list
+    if not isinstance(timeline, list):
+        timeline = []
+
+    # Ensure report_dates is a list
+    if not isinstance(report_dates, list):
+        report_dates = []
+
+    has_any = any(
+        len(markers) > 0 if isinstance(markers, (list, tuple)) else bool(markers)
+        for markers in timeline
+    )
+
+    if not has_any:
+        return "No high-risk resistance markers detected."
+
+    rows = []
+    for date, markers in zip(report_dates, timeline):
+        # Handle case where markers might be a string instead of list
+        if isinstance(markers, str):
+            markers = [markers] if markers else []
+        marker_str = ", ".join(markers) if markers else "None"
+        rows.append(f"| {date} | {marker_str} |")
+
+    header = ("| Date | High-Risk Resistance Markers |\n"
+              "|------|------------------------------|")
+    return header + "\n" + "\n".join(rows)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -194,6 +263,7 @@ def _is_low_confidence(report: CultureReport) -> bool:
     return (
         report.organism == "unknown"
         or report.date == "unknown"
+        or report.specimen_type not in ("urine", "stool")
         or (report.cfu == 0 and "no growth" not in report.raw_text.lower())
     )
 
@@ -222,9 +292,11 @@ def reports_to_dataframe_rows(reports: List[CultureReport]) -> List[List[str]]:
 
 def dataframe_row_to_culture_report(row: List[str]) -> CultureReport:
     """Convert a single Dataframe row (list of strings) back to CultureReport."""
+    from rules import normalize_organism
+
     date_str = row[0].replace(_WARN_PREFIX, "").strip()
     specimen = row[1].strip()
-    organism = row[2].strip()
+    organism = normalize_organism(row[2].strip())
     cfu_str = row[3].replace(",", "").strip()
     resistance_str = row[4].strip()
 
@@ -234,7 +306,7 @@ def dataframe_row_to_culture_report(row: List[str]) -> CultureReport:
         cfu = 0
 
     resistance_markers = (
-        [m.strip() for m in resistance_str.split(",") if m.strip() != "—"]
+        [m.strip() for m in resistance_str.split(",") if m.strip() not in ("—", "")]
         if resistance_str != "—"
         else []
     )
@@ -291,6 +363,15 @@ def process_uploaded_pdfs(
         debug_log += f"--- File {i}/{len(files)}: {filename} ---\n"
 
         markdown_text, parse_error, file_debug = process_pdf_file(pdf_path)
+
+        # PII/PHI Scrubbing: Remove all patient identifiers before processing
+        # First detect what PII is present (for logging/audit)
+        pii_detected = detect_pii(markdown_text)
+        if pii_detected:
+            debug_log += f"  PII detected: {', '.join(pii_detected)}\n"
+
+        # Scrub the PII from the text
+        markdown_text = scrub_pii(markdown_text)
         debug_log += file_debug
 
         if parse_error:
@@ -323,24 +404,29 @@ def process_uploaded_pdfs(
                 report = extract_structured_data(block)
                 debug_log += f"    ✓ Extraction successful\n"
 
-                # Only keep urine/stool specimens
-                if report.specimen_type in ("urine", "stool"):
+                # Accept all reports with valid organism/CFU, even if specimen is unknown
+                # User can edit specimen type in Review & Confirm screen
+                if report.specimen_type not in ("urine", "stool"):
+                    debug_log += (
+                        f"    ⚠ Specimen type '{report.specimen_type}' detected; "
+                        f"user should verify in Review & Confirm\n"
+                    )
+                else:
                     debug_log += (
                         f"    ✓ Specimen type '{report.specimen_type}' accepted\n"
                     )
-                    # Override raw_text to the docling markdown block
-                    report = CultureReport(
-                        date=report.date,
-                        organism=report.organism,
-                        cfu=report.cfu,
-                        resistance_markers=report.resistance_markers,
-                        specimen_type=report.specimen_type,
-                        contamination_flag=report.contamination_flag,
-                        raw_text=block,  # stored for accordion; never forwarded to MedGemma
-                    )
-                    file_reports.append(report)
-                else:
-                    debug_log += f"    ✗ Specimen type '{report.specimen_type}' rejected (not urine/stool)\n"
+
+                # Override raw_text to the docling markdown block
+                report = CultureReport(
+                    date=report.date,
+                    organism=report.organism,
+                    cfu=report.cfu,
+                    resistance_markers=report.resistance_markers,
+                    specimen_type=report.specimen_type,
+                    contamination_flag=report.contamination_flag,
+                    raw_text=block,  # stored for accordion; never forwarded to MedGemma
+                )
+                file_reports.append(report)
 
             except ExtractionError as e:
                 debug_log += f"    ✗ ExtractionError: {e}\n"
@@ -352,7 +438,7 @@ def process_uploaded_pdfs(
         if not file_reports:
             per_file_statuses.append(
                 f'<div style="margin:4px 0"><b>{filename}</b> — '
-                f'<span style="color:#e67e22">⚠ No urine or stool culture data found in this file</span></div>'
+                f'<span style="color:#e67e22">⚠ No culture data found (check debug output)</span></div>'
             )
             debug_log += f"\n✗ No valid culture records found in {filename}\n\n"
         else:
@@ -445,10 +531,10 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         )
         patient_out = render_patient_output(trend, hypothesis, patient_response)
         clinician_out = render_clinician_output(trend, hypothesis, clinician_response)
-        return patient_out, clinician_out
+        return trend, patient_out, clinician_out
 
     def format_output_html(
-        patient_out, clinician_out, raw_blocks: List[str] = None
+        patient_out, clinician_out, trend: TrendResult = None, raw_blocks: List[str] = None
     ) -> Tuple[str, str]:
         """Convert FormattedOutput objects to display HTML — clinical SaaS styling."""
         # ── Patient card ───────────────────────────────────────────────────
@@ -524,69 +610,27 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 "</div>"
             )
 
-        # Resistance table with full drug names
-        if clinician_out.clinician_resistance_detail:
-            # Parse the resistance detail and build table
-            drug_map = {
-                "C": ("Ciprofloxacin", "ciprofloxacin"),
-                "O": ("Oxacillin", "oxacillin"),
-                "R": ("Rifampin", "rifampin"),
-                "S": ("Sulfamethoxazole", "sulfamethoxazole"),
-            }
-
-            # Parse the timeline string: "2026-01-01: C: n, O: s\n 2026-01-10: ..."
-            lines = clinician_out.clinician_resistance_detail.strip().split("\n")
-            table_rows = ""
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith("Resistance"):
-                    continue
-                # Parse date and markers
-                if ":" in line:
-                    parts = line.split(":", 1)
-                    date = parts[0].strip()
-                    markers_str = parts[1].strip() if len(parts) > 1 else ""
-
-                    # Build marker cells
-                    marker_cells = []
-                    for code, (full_name, _) in drug_map.items():
-                        marker_class = "marker-none"
-                        marker_val = "—"
-                        if markers_str:
-                            # Look for pattern like "C: s" or "C:s"
-                            for m in markers_str.split(","):
-                                m = m.strip()
-                                if m.upper().startswith(f"{code}:"):
-                                    val = m.split(":", 1)[1].strip().upper()
-                                    marker_val = val
-                                    if val == "S":
-                                        marker_class = "marker-s"
-                                    elif val == "I":
-                                        marker_class = "marker-i"
-                                    elif val == "R":
-                                        marker_class = "marker-r"
-                                    break
-                        marker_cells.append(
-                            f"<td class='{marker_class}'>{marker_val}</td>"
-                        )
-
-                    table_rows += f"<tr><td>{date}</td>{''.join(marker_cells)}</tr>"
-
-            resistance_table = (
-                "<table class='resistance-table'>"
-                "<thead><tr><th>Date</th>"
-                "<th>Ciprofloxacin</th><th>Oxacillin</th>"
-                "<th>Rifampin</th><th>Sulfamethoxazole</th></tr></thead>"
-                f"<tbody>{table_rows}</tbody></table>"
-            )
-
-            c_body += (
-                "<div style='background:#F5F0EB;border-left:3px solid #D4A574;"
-                "padding:12px 14px;margin:12px 0;border-radius:6px;'>"
-                "<p style='margin:0 0 8px;font-size:0.75rem;font-weight:600;text-transform:uppercase;"
-                "letter-spacing:0.04em;color:#7A6558;'>Resistance Timeline</p>"
-                f"{resistance_table}</div>"
-            )
+        # Resistance timeline using high-risk markers from data model
+        if trend:
+            resistance_timeline_str = render_resistance_timeline(trend)
+            if resistance_timeline_str != "No high-risk resistance markers detected.":
+                # Render table with markers
+                c_body += (
+                    "<div style='background:#F5F0EB;border-left:3px solid #D4A574;"
+                    "padding:12px 14px;margin:12px 0;border-radius:6px;'>"
+                    "<p style='margin:0 0 8px;font-size:0.75rem;font-weight:600;text-transform:uppercase;"
+                    "letter-spacing:0.04em;color:#7A6558;'>Resistance Timeline</p>"
+                    f"<pre style='margin:0;font-size:0.85rem;font-family:monospace;color:#4A3728;"
+                    f"white-space:pre-wrap;'>{resistance_timeline_str}</pre></div>"
+                )
+            else:
+                # Show message when no markers exist
+                c_body += (
+                    "<div style='background:#F5F0EB;border-left:3px solid #D4A574;"
+                    "padding:12px 14px;margin:12px 0;border-radius:6px;'>"
+                    "<p style='margin:0;font-size:0.85rem;color:#5D4037;'>"
+                    "<strong>Resistance Timeline:</strong> No high-risk resistance markers detected.</p></div>"
+                )
 
         if clinician_out.clinician_interpretation:
             c_body += (
@@ -800,6 +844,14 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         .resistance-table .marker-s { color: #16A34A; font-weight: 600; }
         .resistance-table .marker-i { color: #D97706; font-weight: 600; }
         .resistance-table .marker-r { color: #DC2626; font-weight: 600; }
+
+        /* Scrollable textbox for raw extracted text */
+        .raw-textbox textarea {
+            max-height: 300px;
+            overflow-y: auto !important;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
 
         /* PDF count header */
         .pdf-count-header {
@@ -1060,13 +1112,28 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         open=False,
                     ):
                         raw_box_0 = gr.Textbox(
-                            label="Record 1", interactive=False, visible=False, lines=6
+                            label="Record 1",
+                            interactive=False,
+                            visible=False,
+                            container=True,
+                            show_label=True,
+                            elem_classes="raw-textbox",
                         )
                         raw_box_1 = gr.Textbox(
-                            label="Record 2", interactive=False, visible=False, lines=6
+                            label="Record 2",
+                            interactive=False,
+                            visible=False,
+                            container=True,
+                            show_label=True,
+                            elem_classes="raw-textbox",
                         )
                         raw_box_2 = gr.Textbox(
-                            label="Record 3", interactive=False, visible=False, lines=6
+                            label="Record 3",
+                            interactive=False,
+                            visible=False,
+                            container=True,
+                            show_label=True,
+                            elem_classes="raw-textbox",
                         )
 
                     with gr.Row():
@@ -1214,6 +1281,8 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     )
 
                 # Chain the events: first show loading, then process
+                # NOTE: confirm_table is ONLY updated in on_process_pdfs, not in
+                # on_process_pdfs_start, to prevent duplicate rendering
                 btn_process.click(
                     fn=on_process_pdfs_start,
                     inputs=[pdf_upload],
@@ -1257,13 +1326,45 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             "",
                         )
 
+                    # Handle different DataFrame formats from Gradio
+                    # table_data can be: pandas DataFrame, list of lists, or numpy array
+                    rows = []
+                    try:
+                        import pandas as pd
+                        if isinstance(table_data, pd.DataFrame):
+                            # Convert DataFrame to list of lists (values only, no headers)
+                            rows = table_data.values.tolist()
+                        elif hasattr(table_data, 'tolist'):
+                            # numpy array or similar
+                            rows = table_data.tolist()
+                        elif isinstance(table_data, (list, tuple)):
+                            rows = list(table_data)
+                        else:
+                            rows = []
+                    except Exception as e:
+                        logging.warning(f"DEBUG on_confirm: error converting table_data: {e}")
+                        rows = []
+
+                    # Filter out header rows and invalid data
+                    # Headers are typically: ["Date", "Specimen", "Organism", "CFU/mL", "Resistance Markers"]
+                    header_indicators = ["Date", "date", "Specimen", "Organism", "CFU", "Resistance"]
+                    data_rows = []
+                    for row in rows:
+                        # Skip if row is not a list/tuple
+                        if not isinstance(row, (list, tuple)) or len(row) < 5:
+                            continue
+                        # Skip header rows - check if first cell contains header text
+                        first_cell = str(row[0]) if row[0] is not None else ""
+                        if any(indicator in first_cell for indicator in header_indicators):
+                            continue
+                        data_rows.append(row)
+
                     # Convert edited table rows back to CultureReport objects
                     confirmed_reports = []
-                    for row in table_data:
+                    for row in data_rows:
                         try:
-                            confirmed_reports.append(
-                                dataframe_row_to_culture_report(row)
-                            )
+                            report = dataframe_row_to_culture_report(row)
+                            confirmed_reports.append(report)
                         except Exception:
                             pass
 
@@ -1277,9 +1378,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         )
 
                     try:
-                        patient_out, clinician_out = run_pipeline(confirmed_reports)
+                        trend, patient_out, clinician_out = run_pipeline(confirmed_reports)
                         patient_html, clinician_html = format_output_html(
-                            patient_out, clinician_out, raw_blocks
+                            patient_out, clinician_out, trend, raw_blocks
                         )
                     except Exception as e:
                         patient_html = (
@@ -1459,9 +1560,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         )
 
                     try:
-                        patient_out, clinician_out = run_pipeline(reports)
+                        trend, patient_out, clinician_out = run_pipeline(reports)
                         patient_html, clinician_html = format_output_html(
-                            patient_out, clinician_out
+                            patient_out, clinician_out, trend
                         )
                     except Exception as e:
                         patient_html = (

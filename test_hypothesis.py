@@ -5,7 +5,7 @@ Kaggle-native inline tests (no pytest dependency).
 
 from data_models import CultureReport, TrendResult
 from trend import analyze_trend
-from hypothesis import generate_hypothesis, FLAG_EMERGING_RESISTANCE, FLAG_CONTAMINATION
+from hypothesis import generate_hypothesis, FLAG_EMERGING_RESISTANCE, FLAG_CONTAMINATION, FLAG_MULTI_DRUG_RESISTANCE
 
 _PASS = 0
 _FAIL = 0
@@ -159,6 +159,30 @@ trend6 = analyze_trend(rpts6)
 hyp6 = generate_hypothesis(trend6, len(rpts6))
 _assert(
     hyp6.confidence <= 0.95, f"confidence never exceeds 0.95  (got {hyp6.confidence})"
+)
+
+# ---------------------------------------------------------------------------
+# 7. Multi-drug resistance (3+ resistance markers)
+# ---------------------------------------------------------------------------
+print("\n=== Test: Multi-Drug Resistance (3+ Markers) ===")
+rpts7 = [
+    _make_report(90000, date="2026-01-01", markers=["ESBL", "CRE", "MRSA"]),
+    _make_report(85000, date="2026-01-10", markers=["ESBL", "CRE", "MRSA", "VRE"]),
+]
+trend7 = analyze_trend(rpts7)
+hyp7 = generate_hypothesis(trend7, len(rpts7))
+
+_assert(
+    trend7.multi_drug_resistance is True,
+    f"multi_drug_resistance == True when 3+ markers  (got {trend7.multi_drug_resistance})",
+)
+_assert(
+    FLAG_MULTI_DRUG_RESISTANCE in hyp7.risk_flags,
+    f"MULTI_DRUG_RESISTANCE in risk_flags",
+)
+_assert(
+    "Multi-drug resistance" in hyp7.interpretation,
+    f"interpretation mentions multi-drug resistance",
 )
 
 # ---------------------------------------------------------------------------

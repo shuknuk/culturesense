@@ -17,6 +17,7 @@ FLAG_CONTAMINATION = "CONTAMINATION_SUSPECTED"
 FLAG_NON_RESPONSE = "NON_RESPONSE_PATTERN"
 FLAG_INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
 FLAG_ORGANISM_CHANGE = "ORGANISM_CHANGE"
+FLAG_MULTI_DRUG_RESISTANCE = "MULTI_DRUG_RESISTANCE"
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +99,9 @@ def _assign_risk_flags(trend: TrendResult, report_count: int) -> List[str]:
     if not trend.organism_persistent:
         flags.append(FLAG_ORGANISM_CHANGE)
 
+    if trend.multi_drug_resistance:
+        flags.append(FLAG_MULTI_DRUG_RESISTANCE)
+
     return flags
 
 
@@ -129,11 +133,16 @@ def _build_interpretation(trend: TrendResult, report_count: int) -> str:
     if trend.resistance_evolution:
         parts.append("Emerging resistance observed.")
 
-    if not trend.organism_persistent:
+    # Only mention organism change if trend is not cleared
+    # (if cleared, organism persistence is irrelevant - the infection has resolved)
+    if not trend.organism_persistent and trend.cfu_trend != "cleared":
         parts.append("Organism change may indicate reinfection.")
 
     if trend.any_contamination:
         parts.append("Contamination suspected — interpret with caution.")
+
+    if trend.multi_drug_resistance:
+        parts.append("Multi-drug resistance pattern detected.")
 
     return " ".join(parts)
 
@@ -158,7 +167,9 @@ def generate_hypothesis(trend: TrendResult, report_count: int) -> HypothesisResu
     confidence = _score_confidence(trend, report_count)
     risk_flags = _assign_risk_flags(trend, report_count)
     interpretation = _build_interpretation(trend, report_count)
-    stewardship_alert = trend.resistance_evolution
+    # Stewardship alert: only fire if resistance evolved AND infection hasn't cleared
+    # If trend is cleared, historical resistance is not an active stewardship concern
+    stewardship_alert = trend.resistance_evolution and trend.cfu_trend not in ("cleared",)
 
     return HypothesisResult(
         interpretation=interpretation,

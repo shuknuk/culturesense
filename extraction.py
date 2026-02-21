@@ -3,11 +3,12 @@ CultureSense Extraction Layer
 Parses free-text culture reports into typed CultureReport dataclasses.
 """
 
+import json
 import re
 import tempfile
 import warnings
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, Any
 
 from data_models import CultureReport
 from rules import RULES, normalize_organism
@@ -32,7 +33,11 @@ def _process_with_docling(input_text: str) -> str:
         return input_text
 
     input_path = Path(input_text)
-    is_file = input_path.exists() and input_path.is_file()
+    try:
+        is_file = input_path.exists() and input_path.is_file()
+    except OSError:
+        # Input text is too long to be a valid file path
+        is_file = False
 
     try:
         converter = DocumentConverter()
@@ -108,6 +113,9 @@ _RE_DATE_ALT3 = re.compile(r"\b(\d{2}-\d{2}-\d{4})\b")  # MM-DD-YYYY anywhere
 # Resistance markers: exact case-insensitive word boundaries
 _RE_RESISTANCE = re.compile(r"\b(ESBL|CRE|MRSA|VRE|CRKP)\b", re.IGNORECASE)
 
+# Negation words to check around resistance markers (for context-aware extraction)
+_NEGATION_WORDS = ["no ", "not ", "none", "without", "negative for", "undetected", "ruled out"]
+
 # Specimen type - ENHANCED: multiple patterns and keyword detection
 _RE_SPECIMEN_PRIMARY = re.compile(
     r"(?:Specimen|Sample|Source|Type)[\s:]+(urine|stool|wound|blood|urinary|fecal|faecal)",
@@ -124,6 +132,11 @@ _RE_SPECIMEN_ALT2 = re.compile(
 _RE_SPECIMEN_HEADER = re.compile(
     r"(?:^#{1,3}\s*|\*{2}|\_{2}|##\s*)\s*(urine|stool|wound|blood|sputum)\s+culture\b",
     re.IGNORECASE | re.MULTILINE,
+)
+# Quest Diagnostics table format: | Specimen Type | Urine |
+_RE_SPECIMEN_TABLE_CELL = re.compile(
+    r"\|\s*Specimen\s+(?:Type|Source)\s*\|\s*(urine|stool|wound|blood)\s*\|",
+    re.IGNORECASE,
 )
 _RE_SPECIMEN_URINE_KEYWORD = re.compile(
     r"\b(urine|urinary|bladder|catheter)\b", re.IGNORECASE
@@ -355,7 +368,16 @@ def _parse_organism(report_text: str) -> Optional[str]:
 
 def _parse_resistance_markers(report_text: str) -> list[str]:
     """Extract all high-risk resistance markers (deduplicated, uppercase)."""
-    found = _RE_RESISTANCE.findall(report_text)
+    found = []
+    for match in _RE_RESISTANCE.finditer(report_text):
+        marker = match.group(1)
+        # Check 60-char window around match for negation
+        start = max(0, match.start() - 60)
+        end = min(len(report_text), match.end() + 60)
+        context = report_text[start:end].lower()
+        if any(neg in context for neg in _NEGATION_WORDS):
+            continue  # Skip this match - it's in a negation context
+        found.append(marker)
     # deduplicate, preserve order
     return list(dict.fromkeys(m.upper() for m in found))
 
@@ -369,6 +391,11 @@ def _parse_specimen(report_text: str) -> str:
 
     # Try markdown headers and bold text: ## Urine Culture, **Urine Culture**
     m = _RE_SPECIMEN_HEADER.search(text)
+    if m:
+        return _normalize_specimen(m.group(1).lower())
+
+    # Try table cell format: | Specimen Type | Urine | (Quest Diagnostics format)
+    m = _RE_SPECIMEN_TABLE_CELL.search(text)
     if m:
         return _normalize_specimen(m.group(1).lower())
 
@@ -433,9 +460,13 @@ def debug_extraction(report_text: str, label: str = "Report") -> dict:
 
     Returns a dictionary with all extraction results for debugging.
     """
+    try:
+        is_file = Path(report_text).exists()
+    except OSError:
+        is_file = False
     processed_text = (
         _process_with_docling(report_text)
-        if Path(report_text).exists()
+        if is_file
         else report_text
     )
 
@@ -521,4 +552,215 @@ def extract_structured_data(report_text: str) -> CultureReport:
         specimen_type=specimen_type,
         contamination_flag=contamination_flag,
         raw_text=processed_text,  # Store the text actually used for extraction
+    )
+
+
+# =============================================================================
+# MedGemma Fallback Extraction
+# =============================================================================
+
+def _build_medgemma_extraction_prompt(report_text: str) -> str:
+    """
+    Build a structured prompt for MedGemma to extract culture report fields.
+
+    The prompt asks MedGemma to extract specific fields in JSON format.
+    This is used as a fallback when regex extraction fails.
+    """
+    # Truncate text if too long to avoid token limits
+    truncated_text = report_text[:2000] if len(report_text) > 2000 else report_text
+
+    prompt = f"""You are a medical data extraction assistant. Extract structured information from the following microbiology culture report.
+
+Return ONLY a valid JSON object with these exact fields:
+- "organism": The name of the identified organism (e.g., "E. coli", "Klebsiella pneumoniae", "Mixed flora"). Use "unknown" if not found.
+- "cfu": The colony forming units per mL as an integer (e.g., 100000). Use 0 if not found or for "No growth".
+- "date": The collection date in YYYY-MM-DD format. Use "unknown" if not found.
+- "specimen_type": Either "urine", "stool", or "unknown".
+- "resistance_markers": List of resistance markers found (e.g., ["ESBL", "MRSA"]). Use empty list [] if none.
+
+Culture Report Text:
+---
+{truncated_text}
+---
+
+JSON Output:"""
+    return prompt
+
+
+def _parse_medgemma_extraction_response(response: str) -> dict:
+    """
+    Parse MedGemma's JSON response into a dictionary.
+
+    Handles common JSON formatting issues from LLM outputs.
+    """
+    # Try to extract JSON from the response
+    # Sometimes LLMs wrap JSON in markdown code blocks
+    json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+    if json_match:
+        response = json_match.group(1)
+
+    # Try to find raw JSON object
+    json_match = re.search(r'\{[\s\S]*"organism"[\s\S]*\}', response)
+    if json_match:
+        response = json_match.group(0)
+
+    try:
+        data = json.loads(response)
+    except json.JSONDecodeError:
+        # Fallback: try to extract key-value pairs manually
+        data = {}
+        for key in ["organism", "cfu", "date", "specimen_type", "resistance_markers"]:
+            pattern = rf'"{key}"\s*:\s*([^,\}}]+)'
+            match = re.search(pattern, response)
+            if match:
+                value = match.group(1).strip().strip('"')
+                if key == "cfu":
+                    try:
+                        data[key] = int(value)
+                    except ValueError:
+                        data[key] = 0
+                elif key == "resistance_markers":
+                    # Parse list format
+                    if value.startswith("["):
+                        try:
+                            data[key] = json.loads(value)
+                        except:
+                            data[key] = []
+                    else:
+                        data[key] = [v.strip().strip('"') for v in value.split(",") if v.strip()]
+                else:
+                    data[key] = value
+
+    # Validate and set defaults
+    if "organism" not in data or not data["organism"]:
+        data["organism"] = "unknown"
+    if "cfu" not in data:
+        data["cfu"] = 0
+    if "date" not in data or not data["date"]:
+        data["date"] = "unknown"
+    if "specimen_type" not in data or not data["specimen_type"]:
+        data["specimen_type"] = "unknown"
+    if "resistance_markers" not in data:
+        data["resistance_markers"] = []
+
+    return data
+
+
+def extract_structured_data_with_fallback(
+    report_text: str,
+    medgemma_model=None,
+    medgemma_tokenizer=None,
+    use_medgemma_fallback: bool = True
+) -> CultureReport:
+    """
+    Extract structured data from a culture report with MedGemma fallback.
+
+    This function first attempts regex-based extraction. If that fails (ExtractionError),
+    it optionally falls back to MedGemma for LLM-based extraction.
+
+    Args:
+        report_text: The raw culture report text
+        medgemma_model: The MedGemma model (required for fallback)
+        medgemma_tokenizer: The MedGemma tokenizer (required for fallback)
+        use_medgemma_fallback: Whether to use MedGemma when regex fails
+
+    Returns:
+        A CultureReport dataclass with extracted fields
+
+    Raises:
+        ExtractionError: If both regex and MedGemma extraction fail
+    """
+    # First, try regex-based extraction
+    try:
+        return extract_structured_data(report_text)
+    except ExtractionError as e:
+        if not use_medgemma_fallback or medgemma_model is None or medgemma_tokenizer is None:
+            # No fallback available, re-raise the original error
+            raise e
+
+        # Fall back to MedGemma extraction
+        import warnings
+        warnings.warn(
+            "Regex extraction failed, attempting MedGemma fallback extraction.",
+            UserWarning,
+            stacklevel=2
+        )
+
+        try:
+            return _extract_with_medgemma(
+                report_text, medgemma_model, medgemma_tokenizer
+            )
+        except Exception as medgemma_error:
+            # Both methods failed
+            raise ExtractionError(
+                f"Extraction failed: regex extraction failed ({e}) and "
+                f"MedGemma fallback also failed ({medgemma_error})."
+            )
+
+
+def _extract_with_medgemma(
+    report_text: str,
+    model,
+    tokenizer
+) -> CultureReport:
+    """
+    Use MedGemma to extract structured data from a culture report.
+
+    This is an internal fallback function used when regex extraction fails.
+    """
+    import torch
+
+    # Build the extraction prompt
+    prompt = _build_medgemma_extraction_prompt(report_text)
+
+    # Generate response from MedGemma
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=256,
+            temperature=0.1,
+            top_p=0.9,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    # Decode the response
+    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+    # Remove the prompt from the response
+    if prompt in response:
+        response = response[len(prompt):].strip()
+
+    # Parse the JSON response
+    extracted = _parse_medgemma_extraction_response(response)
+
+    # Build and return the CultureReport
+    organism = normalize_organism(extracted.get("organism", "unknown"))
+    cfu = int(extracted.get("cfu", 0))
+    date = extracted.get("date", "unknown")
+    specimen_type = extracted.get("specimen_type", "unknown")
+    resistance_markers = extracted.get("resistance_markers", [])
+
+    # Normalize resistance markers
+    valid_markers = {"ESBL", "CRE", "MRSA", "VRE", "CRKP"}
+    resistance_markers = [
+        m.upper() for m in resistance_markers
+        if m.upper() in valid_markers
+    ]
+
+    contamination_flag = any(
+        term in organism.lower() for term in RULES["contamination_terms"]
+    )
+
+    return CultureReport(
+        date=date,
+        organism=organism,
+        cfu=cfu,
+        resistance_markers=resistance_markers,
+        specimen_type=specimen_type,
+        contamination_flag=contamination_flag,
+        raw_text="",  # Never store raw text when using MedGemma fallback
     )

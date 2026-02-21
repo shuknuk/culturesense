@@ -38,6 +38,8 @@ STRICT RULES:
 4. Use empathetic, reassuring language.
 5. Respond ONLY based on the structured data provided.
 6. Do not reference specific bacteria names to the patient.
+7. When describing CFU values, use ONLY the exact numbers from cfu_values. Do not round, approximate, or change the values in any way.
+8. If resistance_timeline shows no markers, explicitly state there are no signs of antibiotic resistance.
 """.strip()
 
 CLINICIAN_SYSTEM_PROMPT = """

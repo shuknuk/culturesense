@@ -20,6 +20,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 LOCAL_MODULES = {
     "data_models",
     "rules",
+    "pii_removal",
     "extraction",
     "trend",
     "hypothesis",
@@ -237,12 +238,13 @@ print("Imports complete.")
 """
 
 MODELS_MD = "## Cell B: Data Models & Rule Library"
-RULES_MD = "## Cell C: Extraction Layer"
-TREND_MD = "## Cell D: Temporal Trend Engine"
-HYPOTHESIS_MD = "## Cell E: Hypothesis Update Layer"
-MEDGEMMA_MD = "## Cell F: MedGemma Integration"
-RENDERER_MD = "## Cell G: Output Renderer"
-DEMO_MD = """## Cell H: Demo Run
+RULES_MD = "## Cell C: PII Removal Layer"
+EXTRACTION_MD = "## Cell D: Extraction Layer"
+TREND_MD = "## Cell E: Temporal Trend Engine"
+HYPOTHESIS_MD = "## Cell F: Hypothesis Update Layer"
+MEDGEMMA_MD = "## Cell G: MedGemma Integration"
+RENDERER_MD = "## Cell H: Output Renderer"
+DEMO_MD = """## Cell I: Demo Run
 
 Three simulated scenarios demonstrate the full pipeline end-to-end.
 
@@ -252,7 +254,7 @@ Three simulated scenarios demonstrate the full pipeline end-to-end.
 | B — Emerging Resistance | fluctuating | < 0.80, stewardship alert |
 | C — Contamination | decreasing | reduced by −0.20 penalty |
 """
-EVAL_MD = """## Cell I: Evaluation Suite
+EVAL_MD = """## Cell J: Evaluation Suite
 
 Validates all 7 PRD evaluation dimensions:
 
@@ -267,7 +269,7 @@ Validates all 7 PRD evaluation dimensions:
 | Adversarial Robustness | 100% |
 """
 
-GRADIO_MD = """## Cell J: Gradio UI — Extraction Agent
+GRADIO_MD = """## Cell K: Gradio UI — Extraction Agent
 
 Interactive Gradio application with two entry modes:
 
@@ -310,8 +312,11 @@ cells = [
     code_cell(inline("data_models.py")),
     # B cont: Rules (standalone — no local imports)
     code_cell(inline("rules.py")),
-    # C: Extraction Layer
+    # C: PII Removal Layer
     md_cell(RULES_MD),
+    code_cell(inline("pii_removal.py")),
+    # D: Extraction Layer
+    md_cell(EXTRACTION_MD),
     code_cell(inline("extraction.py")),
     code_cell("# --- Extraction Unit Tests ---\n" + inline("test_extraction.py")),
     # D: Trend Engine

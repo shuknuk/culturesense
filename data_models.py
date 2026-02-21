@@ -46,6 +46,7 @@ class TrendResult:
         resistance_timeline: Resistance markers per report
         report_dates: ISO dates in sorted order
         any_contamination: True if any report flagged as contamination
+        multi_drug_resistance: True if any report has 3+ resistance markers
     """
 
     cfu_trend: str
@@ -57,6 +58,7 @@ class TrendResult:
     resistance_timeline: List[List[str]]
     report_dates: List[str]
     any_contamination: bool
+    multi_drug_resistance: bool = False
 
 
 @dataclass
@@ -124,5 +126,6 @@ class FormattedOutput:
     clinician_interpretation: Optional[str] = None
     clinician_confidence: Optional[float] = None
     clinician_resistance_detail: Optional[str] = None
+    clinician_resistance_heatmap: Optional[str] = None
     clinician_stewardship_flag: Optional[bool] = None
     clinician_disclaimer: str = ""
