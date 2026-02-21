@@ -49,29 +49,20 @@ WARM_CLINICAL_THEME = gr.themes.Soft(
 ).set(
     # Warm white background
     body_background_fill="#FDFAF7",
-    body_background_fill_dark="#1a1816",
     background_fill_primary="#FDFAF7",
-    background_fill_primary_dark="#1a1816",
     background_fill_secondary="#F5F0EB",
-    background_fill_secondary_dark="#242220",
-    background_fill_tertiary="#EDE7E0",
-    background_fill_tertiary_dark="#2e2a27",
 
     # Warm gray borders
     border_color_primary="#E8DDD6",
-    border_color_primary_dark="#4a4440",
     block_border_color="#E8DDD6",
-    block_border_color_dark="#4a4440",
 
     # Burnt sienna accent for buttons
     button_primary_background_fill="#C1622F",
     button_primary_background_fill_hover="#a85228",
-    button_primary_background_fill_dark="#C1622F",
     button_primary_text_color="#FDFAF7",
 
     # Subtle shadows only
     block_shadow="0 1px 4px rgba(28,20,18,0.07)",
-    block_radius="4px",
 )
 
 
