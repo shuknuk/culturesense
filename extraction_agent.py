@@ -447,18 +447,31 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         clinician_out = render_clinician_output(trend, hypothesis, clinician_response)
         return patient_out, clinician_out
 
-    def format_output_html(patient_out, clinician_out) -> Tuple[str, str]:
-        """Convert FormattedOutput objects to display HTML — warm classical styling."""
+    def format_output_html(
+        patient_out, clinician_out, raw_blocks: List[str] = None
+    ) -> Tuple[str, str]:
+        """Convert FormattedOutput objects to display HTML — clinical SaaS styling."""
         # ── Patient card ───────────────────────────────────────────────────
         p_body = ""
+
+        # Green resolution alert for cleared/resolution trends
+        if patient_out.patient_trend_phrase and "resolution" in patient_out.patient_trend_phrase.lower():
+            p_body += (
+                "<div class='alert-resolution'>"
+                "<div class='alert-title'>✓ Resolution Detected</div>"
+                "<div class='alert-text'>"
+                "Bacterial load has cleared below detection threshold.</div>"
+                "</div>"
+            )
+
         if patient_out.patient_trend_phrase:
             p_body += (
-                f"<p style='font-size:1.0rem;line-height:1.7;margin:0 0 12px 0;'>"
+                f"<p style='font-size:1.0rem;line-height:1.6;margin:0 0 12px 0;'>"
                 f"<em>Your results show <strong>{patient_out.patient_trend_phrase}</strong>.</em></p>"
             )
         if patient_out.patient_explanation:
             p_body += (
-                f"<div style='line-height:1.75;font-size:0.96rem;'>"
+                f"<div style='line-height:1.6;font-size:0.96rem;'>"
                 f"{patient_out.patient_explanation}</div>"
             )
         if patient_out.patient_questions:
@@ -470,7 +483,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 "<p style='margin:16px 0 8px;font-size:0.75rem;font-weight:600;"
                 "text-transform:uppercase;letter-spacing:0.05em;color:#7A6558;'>"
                 "Questions to ask your doctor</p>"
-                f"<ul style='padding-left:20px;font-size:0.93rem;line-height:1.8;margin:0;'>{qs}</ul>"
+                f"<ul style='padding-left:20px;font-size:0.93rem;line-height:1.6;margin:0;'>{qs}</ul>"
             )
         if patient_out.patient_disclaimer:
             p_body += (
@@ -486,41 +499,98 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
 
         # ── Clinician card ─────────────────────────────────────────────────
         conf_val = clinician_out.clinician_confidence
-        conf_pct_num = int((conf_val or 0) * 100)
         conf_label = f"{conf_val:.0%}" if conf_val is not None else "N/A"
-        conf_bar = (
-            "<div style='margin:0 0 16px;'>"
-            "<div style='display:flex;align-items:baseline;gap:8px;margin-bottom:6px;'>"
-            "<span style='font-size:0.75rem;font-weight:600;text-transform:uppercase;"
-            "letter-spacing:0.04em;color:#7A6558;'>Confidence</span>"
-            f"<span style='font-size:1.25rem;font-weight:700;color:#C1622F;'>{conf_label}</span>"
-            "</div>"
-            "<div style='height:6px;border-radius:3px;background:#E8DDD6;overflow:hidden;'>"
-            f"<div style='height:100%;width:{conf_pct_num}%;background:#C1622F;border-radius:3px;'></div>"
-            "</div></div>"
+
+        # Confidence badge (top-right style)
+        conf_badge = (
+            f"<div class='confidence-badge'>"
+            f"<span>Confidence</span><span class='confidence-value'>{conf_label}</span>"
+            f"</div>"
         )
-        c_body = conf_bar
+
+        # Header with badge
+        c_body = (
+            "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;'>"
+            "<span></span>" + conf_badge + "</div>"
+        )
+
+        # Clinical color logic: #FEE2E2 (red) for stewardship/resistance
         if clinician_out.clinician_stewardship_flag:
             c_body += (
-                "<div style='background:#FDF5F1;border-left:3px solid #C1622F;"
-                "padding:12px 14px;margin:12px 0;border-radius:6px;'>"
-                "<span style='font-size:0.85rem;font-weight:600;color:#8B4513;'>⚠ Stewardship Alert</span>"
-                "<p style='margin:4px 0 0;font-size:0.82rem;color:#5D4037;'>"
-                "Emerging resistance detected — antimicrobial stewardship review recommended.</p>"
+                "<div class='alert-stewardship'>"
+                "<div class='alert-title'>⚠ Stewardship Alert</div>"
+                "<div class='alert-text'>"
+                "Emerging resistance detected — antimicrobial stewardship review recommended.</div>"
                 "</div>"
             )
+
+        # Resistance table with full drug names
         if clinician_out.clinician_resistance_detail:
-            c_body += (
-                "<div style='background:#EDE7E0;border-left:3px solid #D4A574;"
-                "padding:12px 14px;margin:12px 0;border-radius:6px;'>"
-                "<p style='margin:0 0 6px;font-size:0.75rem;font-weight:600;text-transform:uppercase;"
-                "letter-spacing:0.04em;color:#7A6558;'>Resistance Timeline</p>"
-                f"<pre style='margin:0;font-size:12px;font-family:\"Source Code Pro\",monospace;white-space:pre-wrap;color:#4A3728;'>"
-                f"{clinician_out.clinician_resistance_detail}</pre></div>"
+            # Parse the resistance detail and build table
+            drug_map = {
+                "C": ("Ciprofloxacin", "ciprofloxacin"),
+                "O": ("Oxacillin", "oxacillin"),
+                "R": ("Rifampin", "rifampin"),
+                "S": ("Sulfamethoxazole", "sulfamethoxazole"),
+            }
+
+            # Parse the timeline string: "2026-01-01: C: n, O: s\n 2026-01-10: ..."
+            lines = clinician_out.clinician_resistance_detail.strip().split("\n")
+            table_rows = ""
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith("Resistance"):
+                    continue
+                # Parse date and markers
+                if ":" in line:
+                    parts = line.split(":", 1)
+                    date = parts[0].strip()
+                    markers_str = parts[1].strip() if len(parts) > 1 else ""
+
+                    # Build marker cells
+                    marker_cells = []
+                    for code, (full_name, _) in drug_map.items():
+                        marker_class = "marker-none"
+                        marker_val = "—"
+                        if markers_str:
+                            # Look for pattern like "C: s" or "C:s"
+                            for m in markers_str.split(","):
+                                m = m.strip()
+                                if m.upper().startswith(f"{code}:"):
+                                    val = m.split(":", 1)[1].strip().upper()
+                                    marker_val = val
+                                    if val == "S":
+                                        marker_class = "marker-s"
+                                    elif val == "I":
+                                        marker_class = "marker-i"
+                                    elif val == "R":
+                                        marker_class = "marker-r"
+                                    break
+                        marker_cells.append(
+                            f"<td class='{marker_class}'>{marker_val}</td>"
+                        )
+
+                    table_rows += f"<tr><td>{date}</td>{''.join(marker_cells)}</tr>"
+
+            resistance_table = (
+                "<table class='resistance-table'>"
+                "<thead><tr><th>Date</th>"
+                "<th>Ciprofloxacin</th><th>Oxacillin</th>"
+                "<th>Rifampin</th><th>Sulfamethoxazole</th></tr></thead>"
+                f"<tbody>{table_rows}</tbody></table>"
             )
+
+            c_body += (
+                "<div style='background:#F5F0EB;border-left:3px solid #D4A574;"
+                "padding:12px 14px;margin:12px 0;border-radius:6px;'>"
+                "<p style='margin:0 0 8px;font-size:0.75rem;font-weight:600;text-transform:uppercase;"
+                "letter-spacing:0.04em;color:#7A6558;'>Resistance Timeline</p>"
+                f"{resistance_table}</div>"
+            )
+
         if clinician_out.clinician_interpretation:
             c_body += (
-                f"<div style='line-height:1.75;font-size:0.96rem;margin-top:12px;'>"
+                f"<div style='line-height:1.6;font-size:0.96rem;margin-top:12px;'>"
                 f"{clinician_out.clinician_interpretation}</div>"
             )
         if clinician_out.clinician_disclaimer:
@@ -529,6 +599,28 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 "padding-top:12px;margin-top:18px;font-size:0.77rem;line-height:1.6;'>"
                 f"{clinician_out.clinician_disclaimer}</p>"
             )
+
+        # Raw extracted text accordion (if provided)
+        if raw_blocks:
+            raw_sections = ""
+            for i, block in enumerate(raw_blocks, 1):
+                raw_sections += (
+                    f"<div style='margin-bottom:12px;'>"
+                    f"<p style='font-size:0.7rem;font-weight:600;color:#7A6558;margin:0 0 4px;'>"
+                    f"Record {i}</p>"
+                    f"<pre style='margin:0;padding:10px;background:#F5F0EB;border:1px solid #E8DDD6;"
+                    f"border-radius:4px;font-size:0.8rem;overflow-x:auto;'>{block}</pre></div>"
+                )
+            c_body += (
+                "<div style='margin-top:16px;border:1px solid #E8DDD6;border-radius:6px;overflow:hidden;'>"
+                "<details style='background:#FDFAF7;'>"
+                "<summary style='padding:12px 14px;font-size:0.8rem;font-weight:600;color:#5D4037;"
+                "cursor:pointer;background:#F5F0EB;border-bottom:1px solid #E8DDD6;'>"
+                "📋 View Source Data</summary>"
+                f"<div style='padding:14px;'>{raw_sections}</div>"
+                "</details></div>"
+            )
+
         clinician_html = (
             "<div class='output-card'>"
             "<h3>🩺 Clinical Interpretation</h3>" + c_body + "</div>"
@@ -542,6 +634,19 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         css="""
         /* Import Playfair Display for headings */
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&display=swap');
+
+        /* Container - prevent squished text with max-width and centering */
+        .gradio-container {
+            max-width: 1150px !important;
+            margin: 0 auto !important;
+            padding: 40px !important;
+        }
+
+        /* Main content wrapper for better readability */
+        .container {
+            max-width: 1100px !important;
+            margin: 0 auto !important;
+        }
 
         .screen { min-height: 60vh; }
 
@@ -582,7 +687,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* Output cards - medical journal style */
+        /* Output cards - medical journal style with improved readability */
         .output-card {
             border: 1px solid #E8DDD6;
             border-radius: 4px;
@@ -592,7 +697,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             box-shadow: 0 1px 4px rgba(28,20,18,0.07);
             font-family: 'Source Serif 4', Georgia, serif;
             font-size: 0.96rem;
-            line-height: 1.75;
+            line-height: 1.6;
             color: #4A3728;
         }
         .output-card h3 {
@@ -605,6 +710,96 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             border-bottom: 1px solid #E8DDD6;
             letter-spacing: 0.01em;
         }
+
+        /* Clinical alert boxes - traffic light system */
+        .alert-stewardship {
+            background: #FEE2E2 !important;
+            border-left: 3px solid #DC2626 !important;
+            padding: 12px 14px;
+            margin: 12px 0;
+            border-radius: 6px;
+        }
+        .alert-stewardship .alert-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #991B1B;
+        }
+        .alert-stewardship .alert-text {
+            margin: 4px 0 0;
+            font-size: 0.82rem;
+            color: #7F1D1D;
+            line-height: 1.5;
+        }
+
+        .alert-resolution {
+            background: #DCFCE7 !important;
+            border-left: 3px solid #16A34A !important;
+            padding: 12px 14px;
+            margin: 12px 0;
+            border-radius: 6px;
+        }
+        .alert-resolution .alert-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #166534;
+        }
+        .alert-resolution .alert-text {
+            margin: 4px 0 0;
+            font-size: 0.82rem;
+            color: #14532D;
+            line-height: 1.5;
+        }
+
+        /* Confidence badge - compact top-right style */
+        .confidence-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: #F5F0EB;
+            border: 1px solid #E8DDD6;
+            border-radius: 12px;
+            font-family: system-ui, sans-serif;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #7A6558;
+        }
+        .confidence-badge .confidence-value {
+            color: #2563EB;
+            font-size: 0.85rem;
+        }
+
+        /* Resistance timeline table */
+        .resistance-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: 'Source Serif 4', Georgia, serif;
+            font-size: 0.85rem;
+            margin: 8px 0;
+        }
+        .resistance-table th {
+            background: #F5F0EB;
+            border: 1px solid #E8DDD6;
+            padding: 8px 10px;
+            text-align: left;
+            font-family: system-ui, sans-serif;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #7A6558;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .resistance-table td {
+            border: 1px solid #E8DDD6;
+            padding: 8px 10px;
+            color: #4A3728;
+        }
+        .resistance-table tr:nth-child(even) {
+            background: #FAF7F4;
+        }
+        .resistance-table .marker-s { color: #16A34A; font-weight: 600; }
+        .resistance-table .marker-i { color: #D97706; font-weight: 600; }
+        .resistance-table .marker-r { color: #DC2626; font-weight: 600; }
 
         /* PDF count header */
         .pdf-count-header {
@@ -664,7 +859,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             box-shadow: 0 0 0 2px rgba(193, 98, 47, 0.1);
         }
 
-        /* Buttons - warm classical styling */
+        /* Buttons - distinct primary action styling */
         .gr-button {
             font-family: system-ui, sans-serif !important;
             font-size: 0.8rem !important;
@@ -676,16 +871,18 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             transition: all 0.2s ease !important;
         }
         .gr-button:hover {
-            border-color: #C1622F !important;
+            border-color: #2563EB !important;
         }
         .gr-button.primary {
-            background: #C1622F !important;
-            border-color: #C1622F !important;
-            color: #FDFAF7 !important;
+            background: #2563EB !important;
+            border-color: #2563EB !important;
+            color: #FFFFFF !important;
+            box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2) !important;
         }
         .gr-button.primary:hover {
-            background: #a85228 !important;
-            border-color: #a85228 !important;
+            background: #1D4ED8 !important;
+            border-color: #1D4ED8 !important;
+            box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3) !important;
         }
 
         /* Tabs - subtle warm styling */
@@ -711,12 +908,12 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             padding: 10px 16px !important;
         }
         .tab-nav button:hover {
-            color: #C1622F !important;
-            background: rgba(193, 98, 47, 0.05);
+            color: #2563EB !important;
+            background: rgba(37, 99, 235, 0.05);
         }
         .tab-nav button.selected {
-            border-bottom-color: #C1622F !important;
-            color: #C1622F !important;
+            border-bottom-color: #2563EB !important;
+            color: #2563EB !important;
         }
 
         /* Dataframe - table styling */
@@ -747,7 +944,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             font-family: 'Source Serif 4', Georgia, serif;
         }
 
-        /* Accordion */
+        /* Accordion - for Raw Extracted Text */
         .accordion {
             border: 1px solid #E8DDD6;
             border-radius: 4px;
@@ -762,7 +959,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             letter-spacing: 0.04em !important;
         }
         .accordion-header:hover {
-            color: #C1622F !important;
+            color: #2563EB !important;
         }
     """,
     ) as demo:
@@ -1050,7 +1247,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 )
 
                 # ── Event: Confirm & Analyse ────────────────────────────────
-                def on_confirm(table_data):
+                def on_confirm(table_data, raw_blocks):
                     if table_data is None or len(table_data) == 0:
                         return (
                             gr.update(visible=True),
@@ -1082,7 +1279,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     try:
                         patient_out, clinician_out = run_pipeline(confirmed_reports)
                         patient_html, clinician_html = format_output_html(
-                            patient_out, clinician_out
+                            patient_out, clinician_out, raw_blocks
                         )
                     except Exception as e:
                         patient_html = (
@@ -1100,7 +1297,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
 
                 btn_confirm.click(
                     fn=on_confirm,
-                    inputs=[confirm_table],
+                    inputs=[confirm_table, state_raw_blocks],
                     outputs=[
                         screen_confirm,
                         screen_upload,
