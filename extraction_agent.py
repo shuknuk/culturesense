@@ -54,7 +54,6 @@ WARM_CLINICAL_THEME = gr.themes.Soft(
 
     # Warm gray borders (#E8DDD6)
     border_color_primary="#E8DDD6",
-    border_color_secondary="#E8DDD6",
     block_border_color="#E8DDD6",
     input_border_color="#E8DDD6",
     input_border_color_hover="#E8DDD6",
@@ -74,20 +73,12 @@ WARM_CLINICAL_THEME = gr.themes.Soft(
     checkbox_label_text_color_selected="#C1622F",
     checkbox_border_color="#E8DDD6",
     checkbox_border_color_focus="#C1622F",
-    checkbox_label_text_color_hover="#5D4037",
 
     # Accordion styling
-    accordion_border_color="#E8DDD6",
-    accordion_border_radius="4px",
-    accordion_header_text_color="#C1622F",
-    accordion_header_text_color_hover="#a85228",
+    accordion_text_color="#C1622F",
 
     # Subtle shadows only (0 1px 4px with 7% opacity)
     block_shadow="0 1px 4px rgba(28,20,18,0.07)",
-    form_row_shadow="0 1px 4px rgba(28,20,18,0.07)",
-    button_shadow="0 1px 4px rgba(28,20,18,0.07)",
-    button_shadow_active="0 1px 2px rgba(28,20,18,0.1)",
-    button_shadow_hover="0 1px 4px rgba(28,20,18,0.07)",
 )
 
 
