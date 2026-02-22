@@ -545,19 +545,41 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
     """
 
     # ── Shared pipeline helper ──────────────────────────────────────────────
-    def run_pipeline(reports: List[CultureReport]):
-        """Run the unchanged downstream pipeline and return rendered HTML."""
+    def run_pipeline(reports: List[CultureReport], progress=None):
+        """Run the downstream pipeline with progress tracking."""
+        if progress:
+            progress(0.1, desc="Sorting reports by date...")
+
         sorted_reports = sorted(reports, key=lambda r: r.date)
+
+        if progress:
+            progress(0.25, desc="Analyzing trends...")
         trend = analyze_trend(sorted_reports)
+
+        if progress:
+            progress(0.4, desc="Generating hypothesis...")
         hypothesis = generate_hypothesis(trend, len(sorted_reports))
+
+        if progress:
+            progress(0.55, desc="Generating patient explanation...")
         patient_response = call_medgemma(
             trend, hypothesis, "patient", model, tokenizer, is_stub, sorted_reports
         )
+
+        if progress:
+            progress(0.75, desc="Generating clinician analysis...")
         clinician_response = call_medgemma(
             trend, hypothesis, "clinician", model, tokenizer, is_stub, sorted_reports
         )
+
+        if progress:
+            progress(0.9, desc="Formatting output...")
         patient_out = render_patient_output(trend, hypothesis, patient_response, sorted_reports)
         clinician_out = render_clinician_output(trend, hypothesis, clinician_response, sorted_reports)
+
+        if progress:
+            progress(1.0, desc="Complete!")
+
         return trend, patient_out, clinician_out
 
     def format_output_html(
@@ -1356,7 +1378,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 )
 
                 # ── Event: Confirm & Analyse ────────────────────────────────
-                def on_confirm(table_data, raw_blocks, original_reports):
+                def on_confirm(table_data, raw_blocks, original_reports, progress=gr.Progress()):
                     if table_data is None or len(table_data) == 0:
                         return (
                             gr.update(visible=True),
@@ -1418,7 +1440,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         )
 
                     try:
-                        trend, patient_out, clinician_out = run_pipeline(confirmed_reports)
+                        trend, patient_out, clinician_out = run_pipeline(confirmed_reports, progress)
                         patient_html, clinician_html = format_output_html(
                             patient_out, clinician_out, trend, raw_blocks
                         )
