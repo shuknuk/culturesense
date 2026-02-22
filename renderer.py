@@ -7,6 +7,7 @@ and provides display_output() for HTML-rendered Kaggle notebook display.
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from data_models import TrendResult, HypothesisResult, FormattedOutput
@@ -67,68 +68,70 @@ CLINICIAN_DISCLAIMER: str = (
 
 def _build_resistance_explanation_patient(reports: list) -> Optional[str]:
     """
-    Build a patient-friendly explanation of antibiotic resistance patterns.
+    Build a patient-friendly markdown table of antibiotic responses.
 
-    Explains which antibiotics the bacteria responded to and which they didn't,
-    using plain language without medical jargon.
+    Returns a two-column table showing which antibiotics were effective (✅)
+    and which were not (❌), with Intermediate results noted as reduced effectiveness.
     """
     if not reports:
         return None
 
     # Collect all susceptibility data from reports
-    all_resistant = []
-    all_sensitive = []
+    effective = []      # Interpretation "S" (Sensitive)
+    not_effective = []  # Interpretation "R" (Resistant) or "I" (Intermediate)
+
+    seen = set()  # Track unique antibiotic names to avoid duplicates
 
     for report in reports:
         if hasattr(report, 'susceptibility_profile') and report.susceptibility_profile:
             for sus in report.susceptibility_profile:
-                if sus.interpretation.upper() in ("R", "RESISTANT"):
-                    all_resistant.append(sus.antibiotic)
-                elif sus.interpretation.upper() in ("S", "SENSITIVE"):
-                    all_sensitive.append(sus.antibiotic)
+                abx_name = sus.antibiotic.strip()
+                interp = sus.interpretation.upper()
 
-    if not all_resistant and not all_sensitive:
+                # Skip if we've seen this antibiotic already
+                if abx_name.lower() in seen:
+                    continue
+                seen.add(abx_name.lower())
+
+                if interp in ("S", "SENSITIVE"):
+                    effective.append(abx_name)
+                elif interp in ("R", "RESISTANT"):
+                    not_effective.append(abx_name)
+                elif interp in ("I", "INTERMEDIATE"):
+                    # Intermediate gets special annotation
+                    not_effective.append(f"{abx_name} (reduced effectiveness)")
+
+    if not effective and not not_effective:
         return None
 
-    parts = []
+    # Sort each column alphabetically
+    effective = sorted(effective, key=str.lower)
+    not_effective = sorted(not_effective, key=str.lower)
 
-    # Explain resistant antibiotics (if any)
-    if all_resistant:
-        resistant_names = sorted(set(all_resistant))
-        if len(resistant_names) == 1:
-            parts.append(
-                f"The bacteria did not respond to {resistant_names[0]}."
-            )
-        else:
-            # Format as: "A, B, and C"
-            if len(resistant_names) == 2:
-                names_str = " and ".join(resistant_names)
-            else:
-                names_str = ", ".join(resistant_names[:-1]) + ", and " + resistant_names[-1]
-            parts.append(
-                f"The bacteria did not respond to {names_str}."
-            )
+    # Build markdown table with aligned columns
+    # Determine the number of rows needed (max of the two columns)
+    max_rows = max(len(effective), len(not_effective))
 
-    # Explain sensitive antibiotics (if any)
-    if all_sensitive:
-        sensitive_names = sorted(set(all_sensitive))
-        if len(sensitive_names) == 1:
-            parts.append(
-                f"It did respond to {sensitive_names[0]}."
-            )
-        else:
-            # Format as: "A, B, and C"
-            if len(sensitive_names) == 2:
-                names_str = " and ".join(sensitive_names)
-            else:
-                names_str = ", ".join(sensitive_names[:-1]) + ", and " + sensitive_names[-1]
-            parts.append(
-                f"It did respond to {names_str}."
-            )
+    lines = [
+        "| ✅ Effective | ❌ Not Effective |",
+        "|--------------|------------------|",
+    ]
 
-    if parts:
-        return " ".join(parts)
-    return None
+    for i in range(max_rows):
+        eff = effective[i] if i < len(effective) else ""
+        not_eff = not_effective[i] if i < len(not_effective) else ""
+
+        # Handle case where one column is empty
+        if not eff and not not_eff:
+            break
+        if not eff:
+            eff = "None identified"
+        if not not_eff:
+            not_eff = "None identified"
+
+        lines.append(f"| {eff} | {not_eff} |")
+
+    return "\n".join(lines)
 
 
 def _build_antibiotics_explanation(trend: TrendResult) -> str:
@@ -250,7 +253,111 @@ def render_patient_output(
 
 
 # ---------------------------------------------------------------------------
-# G-3: render_clinician_output()
+# G-3: Helper for Clinician Hypotheses Table
+# ---------------------------------------------------------------------------
+
+
+def _parse_hypotheses_table(medgemma_response: str) -> str:
+    """
+    Parse MedGemma's structured response and build a markdown summary table.
+
+    Extracts hypothesis names, confidence scores, and first bullet point of
+    supporting evidence to create a scannable comparison table.
+
+    The full MedGemma response is preserved and appended below the table.
+    """
+    if not medgemma_response:
+        return ""
+
+    lines = medgemma_response.strip().split('\n')
+
+    hypotheses = []  # List of dicts: {name, confidence, evidence}
+    current_hypothesis = None
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Match "Hypothesis 1: Name" or "Hypothesis N: Name"
+        hyp_match = re.match(r'Hypothesis\s+\d+:\s*(.+)', line, re.IGNORECASE)
+        if hyp_match:
+            if current_hypothesis:
+                hypotheses.append(current_hypothesis)
+            current_hypothesis = {
+                'name': hyp_match.group(1).strip(),
+                'confidence': None,
+                'evidence': None
+            }
+            continue
+
+        # Match "Confidence: 0.85" or "Confidence: 85%"
+        if current_hypothesis and 'confidence' in line.lower():
+            conf_match = re.search(r'Confidence[:\s]+([\d.]+)', line, re.IGNORECASE)
+            if conf_match:
+                conf_val = float(conf_match.group(1))
+                # Convert 0-1 to percentage if needed
+                if conf_val <= 1.0:
+                    current_hypothesis['confidence'] = int(conf_val * 100)
+                else:
+                    current_hypothesis['confidence'] = int(conf_val)
+            continue
+
+        # Capture first bullet point under "Supporting Evidence"
+        if current_hypothesis and line.startswith('- ') and current_hypothesis['evidence'] is None:
+            # Skip "Supporting Evidence:" header line
+            if 'supporting evidence' not in line.lower():
+                current_hypothesis['evidence'] = line[2:].strip()  # Remove "- " prefix
+            continue
+
+    # Don't forget the last hypothesis
+    if current_hypothesis:
+        hypotheses.append(current_hypothesis)
+
+    if len(hypotheses) < 1:
+        return ""
+
+    # Build markdown table with dynamic column count
+    # Header row: empty cell + one cell per hypothesis
+    header_cells = [''] + [f"**Hypothesis {i+1}**" for i in range(len(hypotheses))]
+    header = '| ' + ' | '.join(header_cells) + ' |'
+
+    # Separator
+    separator = '|' + '|'.join(['---'] * (len(hypotheses) + 1)) + '|'
+
+    # Assessment row
+    assessment_cells = ['**Assessment**'] + [h['name'] for h in hypotheses]
+    assessment_row = '| ' + ' | '.join(assessment_cells) + ' |'
+
+    # Confidence row
+    confidence_cells = ['**Confidence**']
+    for h in hypotheses:
+        conf = h.get('confidence')
+        if conf is not None:
+            confidence_cells.append(f"{conf}%")
+        else:
+            confidence_cells.append("—")
+    confidence_row = '| ' + ' | '.join(confidence_cells) + ' |'
+
+    # Evidence row (first bullet only)
+    evidence_cells = ['**Key Evidence**']
+    for h in hypotheses:
+        ev = h.get('evidence')
+        if ev:
+            # Truncate long evidence strings
+            if len(ev) > 50:
+                ev = ev[:47] + '...'
+            evidence_cells.append(ev)
+        else:
+            evidence_cells.append("—")
+    evidence_row = '| ' + ' | '.join(evidence_cells) + ' |'
+
+    table = '\n'.join([header, separator, assessment_row, confidence_row, evidence_row])
+    return table
+
+
+# ---------------------------------------------------------------------------
+# G-4: render_clinician_output()
 # ---------------------------------------------------------------------------
 
 
@@ -354,10 +461,17 @@ def render_clinician_output(
         if sus_lines:
             susceptibility_detail = "Antimicrobial Susceptibility Profile:\n" + "\n".join(sus_lines)
 
+    # Build hypotheses summary table and prepend to full MedGemma response
+    hypotheses_table = _parse_hypotheses_table(medgemma_response)
+    if hypotheses_table:
+        clinician_interpretation = f"**Hypotheses Summary**\n\n{hypotheses_table}\n\n---\n\n**Detailed Analysis**\n\n{medgemma_response}"
+    else:
+        clinician_interpretation = medgemma_response
+
     return FormattedOutput(
         mode="clinician",
         clinician_trajectory=trajectory_summary,
-        clinician_interpretation=medgemma_response,
+        clinician_interpretation=clinician_interpretation,
         clinician_confidence=hypothesis.confidence,
         clinician_resistance_detail=resistance_detail,
         clinician_resistance_heatmap=resistance_heatmap,
@@ -368,7 +482,7 @@ def render_clinician_output(
 
 
 # ---------------------------------------------------------------------------
-# G-4: display_output()  — HTML-formatted Kaggle notebook rendering
+# G-5: display_output()  — HTML-formatted Kaggle notebook rendering
 # ---------------------------------------------------------------------------
 
 
