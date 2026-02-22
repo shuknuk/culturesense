@@ -31,7 +31,8 @@ RULES = {
     # Starting confidence before any signal adjustments
     "base_confidence": 0.50,
     # Number of resistant antibiotics to flag as multi-drug resistance
-    "multi_drug_threshold": 3,
+    # Per CLAUDE.md Section 5.4: stewardship alert fires at 2+ classes
+    "multi_drug_threshold": 2,
 }
 
 # ---------------------------------------------------------------------------

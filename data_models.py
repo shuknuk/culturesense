@@ -46,7 +46,8 @@ class TrendResult:
         resistance_timeline: Resistance markers per report
         report_dates: ISO dates in sorted order
         any_contamination: True if any report flagged as contamination
-        multi_drug_resistance: True if any report has 3+ resistance markers
+        multi_drug_resistance: True if any report has 2+ resistance markers
+        recurrent_organism_30d: True if same organism recurs within 30 days
     """
 
     cfu_trend: str
@@ -59,6 +60,7 @@ class TrendResult:
     report_dates: List[str]
     any_contamination: bool
     multi_drug_resistance: bool = False
+    recurrent_organism_30d: bool = False
 
 
 @dataclass

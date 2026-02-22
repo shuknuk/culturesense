@@ -123,19 +123,22 @@ Manual Text Input  ─────┴──► [1] PII Removal Layer
 | `culturesense.ipynb` | Kaggle notebook — **never edit directly, always auto-generated** |
 | `data_models.py` | All dataclasses: CultureReport, TrendResult, HypothesisResult, MedGemmaPayload, FormattedOutput |
 | `pii_removal.py` | PII removal — strips patient name, DOB, MRN before any processing |
-| `extraction.py` | RULES dict, ORGANISM_ALIASES, regex patterns, extract_structured_data(), extract_structured_data_with_fallback() |
+| `extraction.py` | Regex patterns, extract_structured_data(), extract_structured_data_with_fallback() |
 | `trend.py` | analyze_trend(), check_persistence(), check_resistance_evolution(), compute_deltas() |
 | `hypothesis.py` | generate_hypothesis(), confidence scoring, risk flag assignment |
 | `medgemma.py` | Model loading, system prompts, build_medgemma_payload(), call_medgemma() |
 | `renderer.py` | TREND_PHRASES, disclaimers, render_patient_output(), render_clinician_output() |
 | `extraction_agent.py` | Full Gradio dashboard + Docling PDF parsing — Upload + Manual tabs, Review & Confirm, Output |
+| `rules.py` | RULES dict, ORGANISM_ALIASES, thresholds, confidence config |
 | `heatmap.py` | Resistance timeline heatmap visualization (optional matplotlib) |
 | `demo.py` | Local test runner — 3 hardcoded report sets |
 | `evaluation.py` | Eval suite — trend accuracy, Brier score, safety compliance, adversarial tests |
 | `test_extraction.py` | Unit tests — extraction layer |
 | `test_trend.py` | Unit tests — trend engine |
 | `test_hypothesis.py` | Unit tests — hypothesis layer |
+| `test_pii_removal.py` | Unit tests — PII removal layer |
 | `CultureSense_PRD.md` | Full PRD — source of truth for all specs |
+| `sampleReports/` | Sample Quest Diagnostics-style PDF reports for testing |
 | `testPDFs/` | Synthetic Quest Diagnostics-style test PDFs |
 
 ---

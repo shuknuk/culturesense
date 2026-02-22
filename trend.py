@@ -98,6 +98,57 @@ def _build_resistance_timeline(reports: List[CultureReport]) -> List[List[str]]:
     return [list(r.resistance_markers) for r in reports]
 
 
+def _check_recurrent_organism(reports: List[CultureReport]) -> bool:
+    """
+    Return True if the same organism appears in reports within 30 days.
+
+    Per CLAUDE.md Section 5.4: stewardship alert fires when there's a
+    "Recurrent same organism within 30 days" - indicating possible treatment
+    failure or relapse.
+
+    Logic:
+        - Requires at least 2 reports with dates
+        - Check if normalized organism names match
+        - Check if any reports are within 30 days of each other
+    """
+    if len(reports) < 2:
+        return False
+
+    # Get reports with valid dates
+    dated_reports = []
+    for r in reports:
+        if r.date and r.date not in ("unknown", ""):
+            try:
+                from datetime import datetime
+                date_obj = datetime.strptime(r.date, "%Y-%m-%d")
+                normalized_org = ORGANISM_ALIASES.get(
+                    r.organism.strip().lower(), r.organism.strip().lower()
+                )
+                dated_reports.append((date_obj, normalized_org))
+            except (ValueError, AttributeError):
+                continue
+
+    if len(dated_reports) < 2:
+        return False
+
+    # Sort by date
+    dated_reports.sort(key=lambda x: x[0])
+
+    # Check for same organism within 30 days
+    from datetime import timedelta
+
+    for i in range(len(dated_reports)):
+        for j in range(i + 1, len(dated_reports)):
+            date_i, org_i = dated_reports[i]
+            date_j, org_j = dated_reports[j]
+
+            # Check if same organism and within 30 days
+            if org_i == org_j and (date_j - date_i) <= timedelta(days=30):
+                return True
+
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -130,6 +181,7 @@ def analyze_trend(reports: List[CultureReport]) -> TrendResult:
 
     any_contamination = any(r.contamination_flag for r in reports)
     multi_drug_resistance = _check_multi_drug_resistance(reports)
+    recurrent_organism_30d = _check_recurrent_organism(reports)
 
     return TrendResult(
         cfu_trend=cfu_trend,
@@ -142,4 +194,5 @@ def analyze_trend(reports: List[CultureReport]) -> TrendResult:
         report_dates=report_dates,
         any_contamination=any_contamination,
         multi_drug_resistance=multi_drug_resistance,
+        recurrent_organism_30d=recurrent_organism_30d,
     )
