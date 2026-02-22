@@ -128,8 +128,8 @@ Manual Text Input  ─────┴──► [1] PII Removal Layer
 | `hypothesis.py` | generate_hypothesis(), confidence scoring, risk flag assignment |
 | `medgemma.py` | Model loading, system prompts, build_medgemma_payload(), call_medgemma() |
 | `renderer.py` | TREND_PHRASES, disclaimers, render_patient_output(), render_clinician_output() |
-| `extraction_agent.py` | Docling PDF parsing, multi-file handling, deduplication |
-| `gradio_ui.py` | Full Gradio dashboard — Upload + Manual tabs, Review & Confirm, Output |
+| `extraction_agent.py` | Full Gradio dashboard + Docling PDF parsing — Upload + Manual tabs, Review & Confirm, Output |
+| `heatmap.py` | Resistance timeline heatmap visualization (optional matplotlib) |
 | `demo.py` | Local test runner — 3 hardcoded report sets |
 | `evaluation.py` | Eval suite — trend accuracy, Brier score, safety compliance, adversarial tests |
 | `test_extraction.py` | Unit tests — extraction layer |

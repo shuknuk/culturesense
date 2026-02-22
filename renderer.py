@@ -40,9 +40,11 @@ TREND_PHRASES: dict[str, str] = {
 }
 
 PATIENT_QUESTIONS: list[str] = [
-    "Is this trend consistent with my symptoms improving?",
-    "Do I need another follow-up culture test?",
-    "Are there any signs of antibiotic resistance I should know about?",
+    "Is this bacteria definitely causing my symptoms?",
+    "Why was this specific antibiotic chosen?",
+    "Do I need a repeat culture later?",
+    "What symptoms should prompt urgent evaluation?",
+    "Is this likely to happen again?",
 ]
 
 PATIENT_DISCLAIMER: str = (
@@ -51,11 +53,51 @@ PATIENT_DISCLAIMER: str = (
     "Please discuss all lab results with your healthcare provider."
 )
 
-CLINICIAN_DISCLAIMER: str = (
-    "This output represents a structured hypothesis for clinical review. "
-    "It is NOT a diagnosis and does NOT replace clinical judgment. "
-    "All interpretations require full patient context and physician evaluation."
+REASSURANCE_STATEMENT: str = (
+    "This explanation is intended to help you understand your report. "
+    "Your doctor has full knowledge of your medical history and is best placed to guide your care."
 )
+
+
+def _build_antibiotics_explanation(trend: TrendResult) -> str:
+    """
+    Build the 'Why Antibiotics May or May Not Be Used' section for patient output.
+
+    Per CLAUDE.md Section 6.2, this section explains antibiotic decisions without
+    prescribing or recommending specific medications.
+    """
+    if trend.cfu_trend == "cleared":
+        return (
+            "Your bacterial count has dropped to very low levels, which may indicate that "
+            "treatment has been effective. If your doctor has prescribed antibiotics, you should "
+            "complete the full course as directed. If no antibiotics were prescribed, this may be "
+            "because your body is clearing the infection on its own."
+        )
+    elif trend.cfu_trend == "decreasing":
+        return (
+            "Your bacterial count is going down, which suggests the current approach is working. "
+            "If you are taking antibiotics, this indicates they may be effective. "
+            "If no antibiotics were prescribed, your doctor may have determined they were not "
+            "necessary based on your symptoms and overall health."
+        )
+    elif trend.cfu_trend == "increasing":
+        return (
+            "Your bacterial count is rising, which may suggest the current treatment approach "
+            "is not fully effective. Your doctor may consider different antibiotics or additional "
+            "testing to identify the best treatment option for your specific situation."
+        )
+    elif trend.cfu_trend == "fluctuating":
+        return (
+            "Your bacterial count has varied between tests, which can happen for several reasons. "
+            "Your doctor will consider these patterns along with your symptoms to determine "
+            "whether antibiotics are needed or if a different approach might be more appropriate."
+        )
+    else:  # insufficient_data
+        return (
+            "Only one test result is available, so it's difficult to determine whether antibiotics "
+            "are needed without additional information. Your doctor will consider your symptoms, "
+            "overall health, and may request follow-up testing to make the best decision."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +113,14 @@ def render_patient_output(
     """
     Construct a FormattedOutput for Patient Mode.
 
+    Per CLAUDE.md Section 6.2, output includes:
+    1. What This Report Shows (trend_phrase)
+    2. What This May Mean (explanation)
+    3. Why Antibiotics May or May Not Be Used (_build_antibiotics_explanation)
+    4. Questions to Discuss With Your Doctor (PATIENT_QUESTIONS - exactly 5)
+    5. Reassurance Statement (REASSURANCE_STATEMENT)
+    6. Disclaimer (PATIENT_DISCLAIMER - always last)
+
     Args:
         trend:             TrendResult from trend engine.
         hypothesis:        HypothesisResult from hypothesis layer.
@@ -83,6 +133,9 @@ def render_patient_output(
     trend_phrase = TREND_PHRASES.get(trend.cfu_trend, "an uncertain pattern")
     confidence_note = f"Interpretation confidence: {hypothesis.confidence:.2f}"
 
+    # Build antibiotics explanation section
+    antibiotics_explanation = _build_antibiotics_explanation(trend)
+
     # Cap MedGemma explanation to ~150 words (soft limit)
     explanation_words = medgemma_response.split()
     if len(explanation_words) > 150:
@@ -90,10 +143,24 @@ def render_patient_output(
     else:
         explanation = medgemma_response
 
+    # Combine all patient-facing content:
+    # 1. MedGemma explanation (What This Shows, What This May Mean)
+    # 2. Antibiotics explanation (Why Antibiotics May or May Not Be Used)
+    # 3. Reassurance statement
+    # 4. Confidence note
+    full_explanation = (
+        f"{explanation}\n\n"
+        f"**Why Antibiotics May or May Not Be Used**\n"
+        f"{antibiotics_explanation}\n\n"
+        f"**Reassurance**\n"
+        f"{REASSURANCE_STATEMENT}\n\n"
+        f"{confidence_note}"
+    )
+
     return FormattedOutput(
         mode="patient",
         patient_trend_phrase=trend_phrase,
-        patient_explanation=f"{explanation}\n\n{confidence_note}",
+        patient_explanation=full_explanation,
         patient_questions=list(PATIENT_QUESTIONS),
         patient_disclaimer=PATIENT_DISCLAIMER,
     )
