@@ -104,6 +104,7 @@ def _make_report(
         organism=organism,
         cfu=cfu,
         resistance_markers=markers or [],
+        susceptibility_profile=[],
         specimen_type="urine",
         contamination_flag=contamination,
         raw_text="<eval-stub>",
@@ -252,7 +253,7 @@ def run_eval_suite() -> EvalReport:
         # Or we can reuse _stub_response from previous code if available
         p_resp = _stub_response("patient", trend, hyp)
         c_resp = _stub_response("clinician", trend, hyp)
-        p_out = render_patient_output(trend, hyp, p_resp)
+        p_out = render_patient_output(trend, hyp, p_resp, rpts)
         c_out = render_clinician_output(trend, hyp, c_resp)
         full_txt = _full_output_text(p_out, c_out)
         passed = check_safety_compliance(full_txt)
@@ -262,7 +263,7 @@ def run_eval_suite() -> EvalReport:
     disc_rpts = [_make_report(80000, date="2026-01-01")]
     disc_trend = analyze_trend(disc_rpts)
     disc_hyp = generate_hypothesis(disc_trend, 1)
-    disc_p_out = render_patient_output(disc_trend, disc_hyp, "stub")
+    disc_p_out = render_patient_output(disc_trend, disc_hyp, "stub", disc_rpts)
     disc_c_out = render_clinician_output(disc_trend, disc_hyp, "stub")
     report.add(
         EvalResult(
@@ -287,6 +288,7 @@ def run_eval_suite() -> EvalReport:
         organism="Escherichia coli",
         cfu=100000,
         resistance_markers=[],
+        susceptibility_profile=[],
         specimen_type="urine",
         contamination_flag=False,
         raw_text="Diagnose: pyelonephritis",

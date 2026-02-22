@@ -33,6 +33,95 @@ RULES = {
     # Number of resistant antibiotics to flag as multi-drug resistance
     # Per CLAUDE.md Section 5.4: stewardship alert fires at 2+ classes
     "multi_drug_threshold": 2,
+    "min_confidence": 0.20,
+    "confidence_high_base": 0.90,
+    "confidence_longitudinal_penalty": 0.20,
+    "confidence_symptom_penalty": 0.20,
+}
+
+# ---------------------------------------------------------------------------
+# Antibiotic class mapping for MDR detection
+# Maps individual antibiotics to their drug classes for resistance counting.
+# A multi-drug resistant (MDR) organism is defined as resistance to >=2
+# distinct antibiotic classes.
+# ---------------------------------------------------------------------------
+ANTIBIOTIC_CLASSES: dict = {
+    # Beta-lactams
+    "ampicillin": "beta_lactam",
+    "amoxicillin": "beta_lactam",
+    "amoxicillin/clavulanate": "beta_lactam",
+    "piperacillin/tazobactam": "beta_lactam",
+    "cefazolin": "beta_lactam",
+    "cefuroxime": "beta_lactam",
+    "ceftriaxone": "beta_lactam",
+    "ceftazidime": "beta_lactam",
+    "cefepime": "beta_lactam",
+    "ertapenem": "beta_lactam",
+    "meropenem": "beta_lactam",
+    "imipenem": "beta_lactam",
+    "aztreonam": "beta_lactam",
+    "penicillin": "beta_lactam",
+    "oxacillin": "beta_lactam",
+    "nafcillin": "beta_lactam",
+    "ticarcillin/clavulanate": "beta_lactam",
+
+    # Fluoroquinolones
+    "ciprofloxacin": "fluoroquinolone",
+    "levofloxacin": "fluoroquinolone",
+    "moxifloxacin": "fluoroquinolone",
+    "ofloxacin": "fluoroquinolone",
+    "norfloxacin": "fluoroquinolone",
+
+    # Aminoglycosides
+    "gentamicin": "aminoglycoside",
+    "tobramycin": "aminoglycoside",
+    "amikacin": "aminoglycoside",
+
+    # Sulfonamides
+    "trimethoprim/sulfamethoxazole": "sulfonamide",
+    "tmp/smx": "sulfonamide",
+    "tmp-smx": "sulfonamide",
+    "sulfamethoxazole": "sulfonamide",
+
+    # Tetracyclines
+    "tetracycline": "tetracycline",
+    "doxycycline": "tetracycline",
+    "minocycline": "tetracycline",
+    "tigecycline": "tetracycline",
+
+    # Nitrofurans
+    "nitrofurantoin": "nitrofuran",
+
+    # Glycopeptides
+    "vancomycin": "glycopeptide",
+    "teicoplanin": "glycopeptide",
+
+    # Lipopeptides
+    "daptomycin": "lipopeptide",
+
+    # Oxazolidinones
+    "linezolid": "oxazolidinone",
+
+    # Phenicols
+    "chloramphenicol": "phenicol",
+
+    # Fosfomycins
+    "fosfomycin": "fosfomycin",
+
+    # Macrolides
+    "erythromycin": "macrolide",
+    "azithromycin": "macrolide",
+    "clarithromycin": "macrolide",
+
+    # Lincosamides
+    "clindamycin": "lincosamide",
+
+    # Streptogramins
+    "quinupristin/dalfopristin": "streptogramin",
+
+    # Polymyxins
+    "colistin": "polymyxin",
+    "polymyxin b": "polymyxin",
 }
 
 # ---------------------------------------------------------------------------

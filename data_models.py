@@ -8,6 +8,26 @@ from typing import List, Optional, Dict
 
 
 @dataclass
+class AntibioticSusceptibility:
+    """
+    Individual antibiotic susceptibility result from culture report.
+
+    Fields:
+        antibiotic: Name of antimicrobial agent (e.g., "Ciprofloxacin")
+        mic: Minimum Inhibitory Concentration value (e.g., "<= 0.25", ">= 32")
+        interpretation: S/I/R result ("Sensitive", "Intermediate", "Resistant")
+        breakpoints: Susceptibility breakpoints (e.g., "<= 0.25 / >= 1")
+        notes: Optional clinical notes about this antibiotic
+    """
+
+    antibiotic: str
+    mic: str
+    interpretation: str  # "Sensitive", "Intermediate", "Resistant"
+    breakpoints: str = ""
+    notes: str = ""
+
+
+@dataclass
 class CultureReport:
     """
     Structured representation of a single culture lab report.
@@ -17,6 +37,7 @@ class CultureReport:
         organism: Name of identified organism (e.g., "E. coli")
         cfu: Colony Forming Units per mL
         resistance_markers: List of resistance markers (subset of ["ESBL","CRE","MRSA","VRE","CRKP"])
+        susceptibility_profile: Full antimicrobial susceptibility table
         specimen_type: Type of specimen ("urine" | "stool" | "unknown")
         contamination_flag: True if organism matches contamination terms
         raw_text: Original report string (NEVER passed to LLM)
@@ -26,6 +47,7 @@ class CultureReport:
     organism: str
     cfu: int
     resistance_markers: List[str]
+    susceptibility_profile: List[AntibioticSusceptibility]
     specimen_type: str
     contamination_flag: bool
     raw_text: str
@@ -130,4 +152,5 @@ class FormattedOutput:
     clinician_resistance_detail: Optional[str] = None
     clinician_resistance_heatmap: Optional[str] = None
     clinician_stewardship_flag: Optional[bool] = None
+    clinician_susceptibility_detail: Optional[str] = None
     clinician_disclaimer: str = ""

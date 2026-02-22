@@ -10,7 +10,7 @@ import warnings
 from pathlib import Path
 from typing import Optional, Tuple, Any
 
-from data_models import CultureReport
+from data_models import CultureReport, AntibioticSusceptibility
 from rules import RULES, normalize_organism
 
 
@@ -112,6 +112,22 @@ _RE_DATE_ALT3 = re.compile(r"\b(\d{2}-\d{2}-\d{4})\b")  # MM-DD-YYYY anywhere
 
 # Resistance markers: exact case-insensitive word boundaries
 _RE_RESISTANCE = re.compile(r"\b(ESBL|CRE|MRSA|VRE|CRKP)\b", re.IGNORECASE)
+
+# Susceptibility table patterns
+_RE_SUSCEPTIBILITY_ROW = re.compile(
+    r'\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*(Sensitive|Intermediate|Resistant|S|I|R)\s*\|\s*([^|]*)\|\s*([^|]*)\|',
+    re.IGNORECASE
+)
+
+_RE_SUSCEPTIBILITY_ALT = re.compile(
+    r'(?:Antibiotic|Antimicrobial|Agent)[\s:]+([^\n]+?)[\s,]+(?:MIC)?[\s:]*([\d<>.=\s]+(?:ug/mL|mcg/mL|mg/L)?)[\s,]+(?:Interpretation)?[\s:]*(S|I|R|Sensitive|Intermediate|Resistant)',
+    re.IGNORECASE
+)
+
+_RE_ANTIBIOTIC_LINE = re.compile(
+    r'^\s*([A-Za-z\s\-]+?)\s+([<>=\d\.]+\s*(?:ug/ml|mcg/ml|mg/l)?)\s+(S|I|R|Sensitive|Intermediate|Resistant)\b',
+    re.IGNORECASE | re.MULTILINE
+)
 
 # Negation words to check around resistance markers (for context-aware extraction)
 _NEGATION_WORDS = ["no ", "not ", "none", "without", "negative for", "undetected", "ruled out"]
@@ -382,6 +398,133 @@ def _parse_resistance_markers(report_text: str) -> list[str]:
     return list(dict.fromkeys(m.upper() for m in found))
 
 
+def _parse_susceptibility_profile(report_text: str) -> list[AntibioticSusceptibility]:
+    """
+    Extract antimicrobial susceptibility profile from report text.
+
+    Parses susceptibility tables in various formats:
+    - Markdown table format: | Antibiotic | MIC | S/I/R | Breakpoints |
+    - Simple format: Antibiotic: MIC (S/I/R)
+
+    Returns a list of AntibioticSusceptibility dataclass instances.
+    """
+    profile: list[AntibioticSusceptibility] = []
+    seen_antibiotics: set[str] = set()
+
+    # Pattern 1: Markdown table rows | Antibiotic | MIC | Interpretation | ...
+    for match in _RE_SUSCEPTIBILITY_ROW.finditer(report_text):
+        antibiotic = match.group(1).strip()
+        mic = match.group(2).strip()
+        interp_raw = match.group(3).strip().upper()
+        breakpoints = match.group(4).strip() if len(match.groups()) >= 4 else ""
+        notes = match.group(5).strip() if len(match.groups()) >= 5 else ""
+
+        # Normalize interpretation to S/I/R
+        if interp_raw in ("S", "SENSITIVE"):
+            interpretation = "S"
+        elif interp_raw in ("I", "INTERMEDIATE"):
+            interpretation = "I"
+        elif interp_raw in ("R", "RESISTANT"):
+            interpretation = "R"
+        else:
+            interpretation = interp_raw
+
+        # Skip if not a valid antibiotic name (too short or looks like a header)
+        if len(antibiotic) < 3 or antibiotic.lower() in ("antibiotic", "agent", "drug", "name"):
+            continue
+
+        # Deduplicate
+        antibiotic_lower = antibiotic.lower()
+        if antibiotic_lower in seen_antibiotics:
+            continue
+        seen_antibiotics.add(antibiotic_lower)
+
+        profile.append(AntibioticSusceptibility(
+            antibiotic=antibiotic,
+            mic=mic,
+            interpretation=interpretation,
+            breakpoints=breakpoints,
+            notes=notes
+        ))
+
+    # Pattern 2: Alternative format (Antibiotic, MIC, Interpretation inline)
+    for match in _RE_SUSCEPTIBILITY_ALT.finditer(report_text):
+        antibiotic = match.group(1).strip()
+        mic = match.group(2).strip() if len(match.groups()) >= 2 else ""
+        interp_raw = match.group(3).strip().upper() if len(match.groups()) >= 3 else ""
+
+        if interp_raw in ("S", "SENSITIVE"):
+            interpretation = "S"
+        elif interp_raw in ("I", "INTERMEDIATE"):
+            interpretation = "I"
+        elif interp_raw in ("R", "RESISTANT"):
+            interpretation = "R"
+        else:
+            continue  # Skip if no valid interpretation
+
+        if len(antibiotic) < 3 or antibiotic.lower() in ("antibiotic", "agent", "drug", "name"):
+            continue
+
+        antibiotic_lower = antibiotic.lower()
+        if antibiotic_lower in seen_antibiotics:
+            continue
+        seen_antibiotics.add(antibiotic_lower)
+
+        profile.append(AntibioticSusceptibility(
+            antibiotic=antibiotic,
+            mic=mic,
+            interpretation=interpretation,
+            breakpoints="",
+            notes=""
+        ))
+
+    # Pattern 3: Simple line format
+    for match in _RE_ANTIBIOTIC_LINE.finditer(report_text):
+        antibiotic = match.group(1).strip()
+        mic = match.group(2).strip()
+        interp_raw = match.group(3).strip().upper()
+
+        if interp_raw in ("S", "SENSITIVE"):
+            interpretation = "S"
+        elif interp_raw in ("I", "INTERMEDIATE"):
+            interpretation = "I"
+        elif interp_raw in ("R", "RESISTANT"):
+            interpretation = "R"
+        else:
+            interpretation = interp_raw
+
+        if len(antibiotic) < 3 or antibiotic.lower() in ("antibiotic", "agent", "drug", "name"):
+            continue
+
+        antibiotic_lower = antibiotic.lower()
+        if antibiotic_lower in seen_antibiotics:
+            continue
+        seen_antibiotics.add(antibiotic_lower)
+
+        profile.append(AntibioticSusceptibility(
+            antibiotic=antibiotic,
+            mic=mic,
+            interpretation=interpretation,
+            breakpoints="",
+            notes=""
+        ))
+
+    return profile
+
+
+def _format_susceptibility_summary(profile: list[AntibioticSusceptibility]) -> str:
+    """Format susceptibility profile as a concise summary string."""
+    if not profile:
+        return ""
+
+    s_count = sum(1 for a in profile if a.interpretation == "S")
+    i_count = sum(1 for a in profile if a.interpretation == "I")
+    r_count = sum(1 for a in profile if a.interpretation == "R")
+
+    total = len(profile)
+    return f"{total} antibiotics: {s_count}S/{i_count}I/{r_count}R"
+
+
 def _parse_specimen(report_text: str) -> str:
     """
     Extract specimen type with multiple pattern attempts and keyword detection.
@@ -475,6 +618,7 @@ def debug_extraction(report_text: str, label: str = "Report") -> dict:
     specimen = _parse_specimen(processed_text)
     date = _parse_date(processed_text)
     resistance = _parse_resistance_markers(processed_text)
+    susceptibility = _parse_susceptibility_profile(processed_text)
 
     return {
         "label": label,
@@ -484,6 +628,7 @@ def debug_extraction(report_text: str, label: str = "Report") -> dict:
         "specimen": specimen,
         "date": date,
         "resistance": resistance,
+        "susceptibility": susceptibility,
         "is_contamination": _is_contamination(organism) if organism else False,
         "processed_text_preview": processed_text[:500] + "..."
         if len(processed_text) > 500
@@ -543,12 +688,14 @@ def extract_structured_data(report_text: str) -> CultureReport:
     specimen_type = _parse_specimen(processed_text)
     contamination_flag = _is_contamination(organism)
     date = _parse_date(processed_text)
+    susceptibility_profile = _parse_susceptibility_profile(processed_text)
 
     return CultureReport(
         date=date,
         organism=organism,
         cfu=cfu,
         resistance_markers=resistance_markers,
+        susceptibility_profile=susceptibility_profile,
         specimen_type=specimen_type,
         contamination_flag=contamination_flag,
         raw_text=processed_text,  # Store the text actually used for extraction
@@ -760,6 +907,7 @@ def _extract_with_medgemma(
         organism=organism,
         cfu=cfu,
         resistance_markers=resistance_markers,
+        susceptibility_profile=[],  # MedGemma fallback doesn't extract susceptibility
         specimen_type=specimen_type,
         contamination_flag=contamination_flag,
         raw_text="",  # Never store raw text when using MedGemma fallback

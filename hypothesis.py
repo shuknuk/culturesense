@@ -25,15 +25,17 @@ FLAG_MULTI_DRUG_RESISTANCE = "MULTI_DRUG_RESISTANCE"
 # ---------------------------------------------------------------------------
 
 
-def _score_confidence(trend: TrendResult, report_count: int) -> float:
+def _score_confidence(trend: TrendResult, report_count: int, has_symptom_data: bool = False) -> float:
     """
-    Apply deterministic signal adjustments to a base confidence value.
+    Apply deterministic signal adjustments to base confidence value.
 
-    Starting point: RULES["base_confidence"] = 0.50
-    Each signal adds or subtracts a fixed delta.
-    Final value is clamped to [0.0, RULES["max_confidence"]].
+    New algorithm (Section 7.1, updated):
+        - Start at 0.90 if organism, threshold, and susceptibility are clear
+        - Subtract 0.20 if no longitudinal data (single report)
+        - Subtract 0.20 if no symptom data
+        - Clamp to [min_confidence, max_confidence] = [0.20, 0.95]
 
-    Signal table (Section 7.1):
+    Legacy trend signals (still applied for longitudinal data):
         +0.30  CFU decreasing
         +0.40  CFU cleared
         +0.20  CFU increasing  (high confidence of non-response)
@@ -41,38 +43,45 @@ def _score_confidence(trend: TrendResult, report_count: int) -> float:
         -0.10  resistance evolution
         -0.05  organism changed
         -0.20  contamination present
-        -0.25  fewer than 2 reports
     """
-    confidence = RULES["base_confidence"]
+    # Start with high base confidence (clear organism, threshold, susceptibility)
+    confidence = RULES["confidence_high_base"]
 
-    # Trend signal
-    if trend.cfu_trend == "decreasing":
-        confidence += 0.30
-    elif trend.cfu_trend == "cleared":
-        confidence += 0.40
-    elif trend.cfu_trend == "increasing":
-        confidence += 0.20  # high confidence of non-response
-    elif trend.cfu_trend == "fluctuating":
-        confidence -= 0.10
+    # Penalty: no longitudinal data (single report)
+    if report_count < 2:
+        confidence -= RULES["confidence_longitudinal_penalty"]
 
-    # Resistance evolution penalty
-    if trend.resistance_evolution:
-        confidence -= 0.10
+    # Penalty: no symptom data
+    if not has_symptom_data:
+        confidence -= RULES["confidence_symptom_penalty"]
 
-    # Organism change uncertainty
-    if not trend.organism_persistent:
-        confidence -= 0.05
+    # Legacy trend signals (only apply if we have longitudinal data)
+    if report_count >= 2:
+        if trend.cfu_trend == "decreasing":
+            confidence += 0.30
+        elif trend.cfu_trend == "cleared":
+            confidence += 0.40
+        elif trend.cfu_trend == "increasing":
+            confidence += 0.20  # high confidence of non-response
+        elif trend.cfu_trend == "fluctuating":
+            confidence -= 0.10
 
-    # Contamination validity concern
+        # Resistance evolution penalty (only for longitudinal)
+        if trend.resistance_evolution:
+            confidence -= 0.10
+
+        # Organism change uncertainty (only for longitudinal)
+        if not trend.organism_persistent:
+            confidence -= 0.05
+
+    # Contamination validity concern (always applies)
     if trend.any_contamination:
         confidence -= 0.20
 
-    # Insufficient data penalty
-    if report_count < 2:
-        confidence -= 0.25
-
-    # Hard clamp: never < 0.0, never > max_confidence (epistemic humility)
-    return round(max(0.0, min(confidence, RULES["max_confidence"])), 4)
+    # Hard clamp: never < min_confidence, never > max_confidence (epistemic humility)
+    min_conf = RULES.get("min_confidence", 0.20)
+    max_conf = RULES["max_confidence"]
+    return round(max(min_conf, min(confidence, max_conf)), 4)
 
 
 # ---------------------------------------------------------------------------

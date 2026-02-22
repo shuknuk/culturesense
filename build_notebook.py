@@ -348,7 +348,7 @@ cells = [
     code_cell(
         "# Launch the CultureSense Gradio app\n"
         "demo = build_gradio_app(model, tokenizer, is_stub)\n"
-        "demo.launch(share=True)"
+        "demo.launch(share=True, debug=True)"
     ),
     md_cell(FOOTER_MD),
 ]

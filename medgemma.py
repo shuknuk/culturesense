@@ -40,6 +40,8 @@ STRICT RULES:
 6. Do not reference specific bacteria names to the patient.
 7. When describing CFU values, use ONLY the exact numbers from cfu_values. Do not round, approximate, or change the values in any way.
 8. If resistance_timeline shows no markers, explicitly state there are no signs of antibiotic resistance.
+9. When susceptibility_profiles is provided, analyze which antibiotics are SENSITIVE (will work) vs RESISTANT (will not work). Explain this in plain language: "The bacteria responded to X antibiotics" or "The bacteria did not respond to Y antibiotics." Do not use medical abbreviations like S/I/R.
+10. Never mention specific antibiotic names (e.g., Ciprofloxacin, Nitrofurantoin, Ampicillin, Ceftriaxone, etc.). Do not list drug names. Instead say "some antibiotics were tested" or "your doctor has the full antibiotic results".
 """.strip()
 
 CLINICIAN_SYSTEM_PROMPT = """
@@ -54,6 +56,19 @@ STRICT RULES:
 4. End with: "Clinical interpretation requires full patient context."
 5. Use clinical terminology appropriate for a physician audience.
 6. Never recommend a specific antibiotic or treatment regimen.
+7. When susceptibility_profiles is provided, analyze antimicrobial susceptibility patterns. Identify which antibiotic classes are effective (Sensitive) vs ineffective (Resistant). Note any multi-drug resistance patterns. Include MIC values where clinically relevant.
+8. You MUST return exactly 2 ranked hypotheses. Never return a single paragraph. Format:
+
+Hypothesis 1: [name]
+  Supporting Evidence:
+    - [point 1]
+    - [point 2]
+  Confidence: [0.0-0.95]
+
+Hypothesis 2: [name]
+  Supporting Evidence:
+    - [point 1]
+  Confidence: [0.0-0.95]
 """.strip()
 
 # ---------------------------------------------------------------------------
@@ -62,10 +77,36 @@ STRICT RULES:
 # ---------------------------------------------------------------------------
 
 
+def _format_susceptibility_for_payload(reports: list) -> list[dict]:
+    """
+    Format susceptibility profiles from reports for MedGemma payload.
+
+    Returns a list of report summaries with antibiotic susceptibility data.
+    """
+    result = []
+    for report in reports:
+        if hasattr(report, 'susceptibility_profile') and report.susceptibility_profile:
+            antibiotics = []
+            for s in report.susceptibility_profile:
+                antibiotics.append({
+                    "antibiotic": s.antibiotic,
+                    "mic": s.mic,
+                    "interpretation": s.interpretation
+                })
+            result.append({
+                "date": report.date,
+                "organism": report.organism,
+                "cfu": report.cfu,
+                "antibiotics": antibiotics
+            })
+    return result
+
+
 def build_medgemma_payload(
     trend: TrendResult,
     hypothesis: HypothesisResult,
     mode: str,
+    reports: list = None,
 ) -> str:
     """
     Build a JSON string to pass as the user turn to MedGemma.
@@ -77,6 +118,7 @@ def build_medgemma_payload(
         trend:      Computed TrendResult.
         hypothesis: Computed HypothesisResult.
         mode:       "patient" | "clinician"
+        reports:    Optional list of CultureReport objects for susceptibility data.
 
     Returns:
         JSON string ready to embed in a chat message.
@@ -101,6 +143,11 @@ def build_medgemma_payload(
         "requires_clinician_review": hypothesis.requires_clinician_review,
         # raw_text intentionally omitted — safety guarantee
     }
+
+    # Include susceptibility data if reports provided
+    if reports:
+        payload["susceptibility_profiles"] = _format_susceptibility_for_payload(reports)
+
     return json.dumps(payload, indent=2)
 
 
@@ -174,36 +221,92 @@ def _stub_response(mode: str, trend: TrendResult, hypothesis: HypothesisResult) 
             "insufficient_data": "limited data — only one result is available",
         }.get(trend.cfu_trend, "an uncertain pattern in your lab values")
 
-        flags_note = ""
+        # Build explanation without mentioning specific antibiotic names
+        explanation_parts = []
+
         if trend.resistance_evolution:
-            flags_note = (
-                " Your doctor may want to discuss the latest results in detail."
+            explanation_parts.append(
+                "Some changes in antibiotic response were detected. Your doctor may want to discuss the latest results in detail."
             )
+        elif trend.cfu_trend == "cleared":
+            explanation_parts.append(
+                "The bacterial count has dropped to very low levels. This may indicate that treatment has been effective."
+            )
+        elif trend.cfu_trend == "decreasing":
+            explanation_parts.append(
+                "The bacterial count is going down, which suggests the current approach is working."
+            )
+        elif trend.cfu_trend == "increasing":
+            explanation_parts.append(
+                "The bacterial count is rising. Your doctor may consider additional testing to identify the best approach."
+            )
+        else:
+            explanation_parts.append(
+                "Your doctor has the full test results and will discuss what this means for your care."
+            )
+
+        flags_note = " ".join(explanation_parts)
 
         return (
             f"Your lab results show {trend_desc} over the time period reviewed. "
-            f"This information has been summarised for your awareness.{flags_note} "
+            f"{flags_note} "
             "Please discuss these findings with your doctor."
         )
 
     else:  # clinician
         flags = ", ".join(hypothesis.risk_flags) if hypothesis.risk_flags else "None"
         stewardship = (
-            "ALERT: Antimicrobial stewardship review recommended."
+            "\nStewardship Alert: Antimicrobial stewardship review recommended."
             if hypothesis.stewardship_alert
             else ""
         )
+
+        # Build evidence points from trend data
+        evidence_points = []
+        if trend.cfu_trend == "decreasing":
+            evidence_points.append("CFU trend shows decreasing bacterial load")
+        elif trend.cfu_trend == "cleared":
+            evidence_points.append("CFU values have normalized")
+        elif trend.cfu_trend == "increasing":
+            evidence_points.append("CFU trend shows increasing bacterial load")
+
+        if trend.organism_persistent:
+            evidence_points.append("Organism persistence across reports")
+        else:
+            evidence_points.append("Organism variation between reports")
+
+        if trend.resistance_evolution:
+            evidence_points.append("Resistance markers detected")
+
+        # Build first hypothesis (primary)
+        primary_evidence = [f"  - {point}" for point in evidence_points[:2]]
+        primary_evidence_str = "\n".join(primary_evidence) if primary_evidence else "  - Trend data available"
+
+        # Build second hypothesis (alternative)
+        alt_evidence = []
+        if trend.cfu_trend == "insufficient_data":
+            alt_evidence.append("  - Single report limits trend analysis")
+        else:
+            alt_evidence.append("  - Multiple reports provide trend context")
+
+        if trend.any_contamination:
+            alt_evidence.append("  - Contamination flag present")
+
+        alt_evidence_str = "\n".join(alt_evidence) if alt_evidence else "  - Follow-up testing recommended"
+
         return (
-            f"Trajectory Hypothesis Summary\n"
-            f"CFU Trend: {trend.cfu_trend}\n"
-            f"Organism Persistent: {trend.organism_persistent}\n"
-            f"Resistance Evolution: {trend.resistance_evolution}\n"
-            f"Confidence: {hypothesis.confidence:.2f} ({hypothesis.confidence * 100:.0f}%)\n"
-            f"Risk Flags: {flags}\n"
-            f"{stewardship}\n"
-            f"Interpretation: {hypothesis.interpretation}\n"
+            f"Hypothesis 1: {hypothesis.interpretation}\n"
+            f"  Supporting Evidence:\n"
+            f"{primary_evidence_str}\n"
+            f"  Confidence: {hypothesis.confidence:.2f}\n\n"
+            f"Hypothesis 2: Alternative Interpretation\n"
+            f"  Supporting Evidence:\n"
+            f"{alt_evidence_str}\n"
+            f"  Confidence: {max(0.0, hypothesis.confidence - 0.25):.2f}\n"
+            f"{stewardship}\n\n"
+            "Risk Flags: " + flags + "\n"
             "Clinical interpretation requires full patient context."
-        ).strip()
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +321,7 @@ def call_medgemma(
     model=None,
     tokenizer=None,
     is_stub: bool = True,
+    reports: list = None,
 ) -> str:
     """
     Call MedGemma with a fully structured JSON payload.
@@ -248,7 +352,7 @@ def call_medgemma(
     system_prompt = (
         PATIENT_SYSTEM_PROMPT if mode == "patient" else CLINICIAN_SYSTEM_PROMPT
     )
-    user_content = build_medgemma_payload(trend, hypothesis, mode)
+    user_content = build_medgemma_payload(trend, hypothesis, mode, reports)
 
     messages = [
         {"role": "system", "content": system_prompt},

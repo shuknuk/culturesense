@@ -36,7 +36,7 @@ TREND_PHRASES: dict[str, str] = {
     "cleared": "resolution of detectable bacteria",
     "increasing": "an upward trend in bacterial count",
     "fluctuating": "a variable pattern in bacterial count",
-    "insufficient_data": "only one data point available",
+    "insufficient_data": "a single report (upload additional reports for trend analysis)",
 }
 
 PATIENT_QUESTIONS: list[str] = [
@@ -65,6 +65,72 @@ CLINICIAN_DISCLAIMER: str = (
 )
 
 
+def _build_resistance_explanation_patient(reports: list) -> Optional[str]:
+    """
+    Build a patient-friendly explanation of antibiotic resistance patterns.
+
+    Explains which antibiotics the bacteria responded to and which they didn't,
+    using plain language without medical jargon.
+    """
+    if not reports:
+        return None
+
+    # Collect all susceptibility data from reports
+    all_resistant = []
+    all_sensitive = []
+
+    for report in reports:
+        if hasattr(report, 'susceptibility_profile') and report.susceptibility_profile:
+            for sus in report.susceptibility_profile:
+                if sus.interpretation.upper() in ("R", "RESISTANT"):
+                    all_resistant.append(sus.antibiotic)
+                elif sus.interpretation.upper() in ("S", "SENSITIVE"):
+                    all_sensitive.append(sus.antibiotic)
+
+    if not all_resistant and not all_sensitive:
+        return None
+
+    parts = []
+
+    # Explain resistant antibiotics (if any)
+    if all_resistant:
+        resistant_names = sorted(set(all_resistant))
+        if len(resistant_names) == 1:
+            parts.append(
+                f"The bacteria did not respond to {resistant_names[0]}."
+            )
+        else:
+            # Format as: "A, B, and C"
+            if len(resistant_names) == 2:
+                names_str = " and ".join(resistant_names)
+            else:
+                names_str = ", ".join(resistant_names[:-1]) + ", and " + resistant_names[-1]
+            parts.append(
+                f"The bacteria did not respond to {names_str}."
+            )
+
+    # Explain sensitive antibiotics (if any)
+    if all_sensitive:
+        sensitive_names = sorted(set(all_sensitive))
+        if len(sensitive_names) == 1:
+            parts.append(
+                f"It did respond to {sensitive_names[0]}."
+            )
+        else:
+            # Format as: "A, B, and C"
+            if len(sensitive_names) == 2:
+                names_str = " and ".join(sensitive_names)
+            else:
+                names_str = ", ".join(sensitive_names[:-1]) + ", and " + sensitive_names[-1]
+            parts.append(
+                f"It did respond to {names_str}."
+            )
+
+    if parts:
+        return " ".join(parts)
+    return None
+
+
 def _build_antibiotics_explanation(trend: TrendResult) -> str:
     """
     Build the 'Why Antibiotics May or May Not Be Used' section for patient output.
@@ -75,15 +141,15 @@ def _build_antibiotics_explanation(trend: TrendResult) -> str:
     if trend.cfu_trend == "cleared":
         return (
             "Your bacterial count has dropped to very low levels, which may indicate that "
-            "treatment has been effective. If your doctor has prescribed antibiotics, you should "
-            "complete the full course as directed. If no antibiotics were prescribed, this may be "
+            "treatment has been effective. If antibiotics were ordered by your doctor, it is important to "
+            "complete the full course as directed. If no antibiotics were ordered, this may be "
             "because your body is clearing the infection on its own."
         )
     elif trend.cfu_trend == "decreasing":
         return (
             "Your bacterial count is going down, which suggests the current approach is working. "
             "If you are taking antibiotics, this indicates they may be effective. "
-            "If no antibiotics were prescribed, your doctor may have determined they were not "
+            "If no antibiotics were ordered, your doctor may have determined they were not "
             "necessary based on your symptoms and overall health."
         )
     elif trend.cfu_trend == "increasing":
@@ -115,6 +181,7 @@ def render_patient_output(
     trend: TrendResult,
     hypothesis: HypothesisResult,
     medgemma_response: str,
+    reports: list = None,
 ) -> FormattedOutput:
     """
     Construct a FormattedOutput for Patient Mode.
@@ -131,6 +198,7 @@ def render_patient_output(
         trend:             TrendResult from trend engine.
         hypothesis:        HypothesisResult from hypothesis layer.
         medgemma_response: String from call_medgemma() in 'patient' mode.
+        reports:           Optional list of CultureReport objects for resistance details.
 
     Returns:
         FormattedOutput with patient_* fields populated.
@@ -142,6 +210,9 @@ def render_patient_output(
     # Build antibiotics explanation section
     antibiotics_explanation = _build_antibiotics_explanation(trend)
 
+    # Build resistance explanation from susceptibility data
+    resistance_explanation = _build_resistance_explanation_patient(reports)
+
     # Cap MedGemma explanation to ~150 words (soft limit)
     explanation_words = medgemma_response.split()
     if len(explanation_words) > 150:
@@ -151,11 +222,17 @@ def render_patient_output(
 
     # Combine all patient-facing content:
     # 1. MedGemma explanation (What This Shows, What This May Mean)
-    # 2. Antibiotics explanation (Why Antibiotics May or May Not Be Used)
-    # 3. Reassurance statement
-    # 4. Confidence note
+    # 2. Resistance explanation (if available)
+    # 3. Antibiotics explanation (Why Antibiotics May or May Not Be Used)
+    # 4. Reassurance statement
+    # 5. Confidence note
+    resistance_section = ""
+    if resistance_explanation:
+        resistance_section = f"\n\n**Antibiotic Response**\n{resistance_explanation}"
+
     full_explanation = (
-        f"{explanation}\n\n"
+        f"{explanation}"
+        f"{resistance_section}\n\n"
         f"**Why Antibiotics May or May Not Be Used**\n"
         f"{antibiotics_explanation}\n\n"
         f"**Reassurance**\n"
@@ -181,6 +258,7 @@ def render_clinician_output(
     trend: TrendResult,
     hypothesis: HypothesisResult,
     medgemma_response: str,
+    reports: list = None,
 ) -> FormattedOutput:
     """
     Construct a FormattedOutput for Clinician Mode.
@@ -262,6 +340,20 @@ def render_clinician_output(
             trend.report_dates
         )
 
+    # Build susceptibility profile detail from reports
+    susceptibility_detail: Optional[str] = None
+    if reports:
+        sus_lines = []
+        for report in reports:
+            if hasattr(report, 'susceptibility_profile') and report.susceptibility_profile:
+                sus_lines.append(f"\n{report.date} - {report.organism}:")
+                sus_lines.append("  Antibiotic | MIC | Result")
+                sus_lines.append("  " + "-" * 40)
+                for sus in report.susceptibility_profile:
+                    sus_lines.append(f"  {sus.antibiotic:<20} | {sus.mic:<10} | {sus.interpretation}")
+        if sus_lines:
+            susceptibility_detail = "Antimicrobial Susceptibility Profile:\n" + "\n".join(sus_lines)
+
     return FormattedOutput(
         mode="clinician",
         clinician_trajectory=trajectory_summary,
@@ -270,6 +362,7 @@ def render_clinician_output(
         clinician_resistance_detail=resistance_detail,
         clinician_resistance_heatmap=resistance_heatmap,
         clinician_stewardship_flag=hypothesis.stewardship_alert,
+        clinician_susceptibility_detail=susceptibility_detail,
         clinician_disclaimer=CLINICIAN_DISCLAIMER,
     )
 

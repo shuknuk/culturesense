@@ -32,6 +32,7 @@ def _make_report(
         organism=organism,
         cfu=cfu,
         resistance_markers=markers or [],
+        susceptibility_profile=[],
         specimen_type="urine",
         contamination_flag=contamination,
         raw_text="<stub>",

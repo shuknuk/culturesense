@@ -46,14 +46,14 @@ def run_scenario(
     hypothesis = generate_hypothesis(trend, len(sorted_reports))
 
     patient_response = call_medgemma(
-        trend, hypothesis, "patient", model, tokenizer, is_stub
+        trend, hypothesis, "patient", model, tokenizer, is_stub, sorted_reports
     )
     clinician_response = call_medgemma(
-        trend, hypothesis, "clinician", model, tokenizer, is_stub
+        trend, hypothesis, "clinician", model, tokenizer, is_stub, sorted_reports
     )
 
-    patient_out = render_patient_output(trend, hypothesis, patient_response)
-    clinician_out = render_clinician_output(trend, hypothesis, clinician_response)
+    patient_out = render_patient_output(trend, hypothesis, patient_response, sorted_reports)
+    clinician_out = render_clinician_output(trend, hypothesis, clinician_response, sorted_reports)
 
     display_output(patient_out, clinician_out, scenario_name=name)
 
@@ -71,10 +71,10 @@ def run_scenario(
 # ---------------------------------------------------------------------------
 scenario_a = [
     CultureReport(
-        "2026-01-01", "Escherichia coli", 120000, [], "urine", False, "<raw>"
+        "2026-01-01", "Escherichia coli", 120000, [], [], "urine", False, "<raw>"
     ),
-    CultureReport("2026-01-10", "Escherichia coli", 40000, [], "urine", False, "<raw>"),
-    CultureReport("2026-01-20", "Escherichia coli", 5000, [], "urine", False, "<raw>"),
+    CultureReport("2026-01-10", "Escherichia coli", 40000, [], [], "urine", False, "<raw>"),
+    CultureReport("2026-01-20", "Escherichia coli", 5000, [], [], "urine", False, "<raw>"),
 ]
 
 run_scenario(
@@ -88,13 +88,13 @@ run_scenario(
 # ---------------------------------------------------------------------------
 scenario_b = [
     CultureReport(
-        "2026-01-01", "Klebsiella pneumoniae", 90000, [], "urine", False, "<raw>"
+        "2026-01-01", "Klebsiella pneumoniae", 90000, [], [], "urine", False, "<raw>"
     ),
     CultureReport(
-        "2026-01-10", "Klebsiella pneumoniae", 80000, [], "urine", False, "<raw>"
+        "2026-01-10", "Klebsiella pneumoniae", 80000, [], [], "urine", False, "<raw>"
     ),
     CultureReport(
-        "2026-01-20", "Klebsiella pneumoniae", 75000, ["ESBL"], "urine", False, "<raw>"
+        "2026-01-20", "Klebsiella pneumoniae", 75000, ["ESBL"], [], "urine", False, "<raw>"
     ),
 ]
 
@@ -108,8 +108,8 @@ run_scenario(
 # Cell H-3: Scenario C — Contamination
 # ---------------------------------------------------------------------------
 scenario_c = [
-    CultureReport("2026-01-01", "mixed flora", 5000, [], "urine", True, "<raw>"),
-    CultureReport("2026-01-10", "mixed flora", 3000, [], "urine", True, "<raw>"),
+    CultureReport("2026-01-01", "mixed flora", 5000, [], [], "urine", True, "<raw>"),
+    CultureReport("2026-01-10", "mixed flora", 3000, [], [], "urine", True, "<raw>"),
 ]
 
 run_scenario(

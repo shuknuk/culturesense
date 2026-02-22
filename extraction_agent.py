@@ -273,11 +273,25 @@ def _is_low_confidence(report: CultureReport) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _format_susceptibility_summary(report: CultureReport) -> str:
+    """Format susceptibility profile as a compact summary string."""
+    if not report.susceptibility_profile:
+        return "—"
+
+    s_count = sum(1 for s in report.susceptibility_profile if s.interpretation == "S")
+    i_count = sum(1 for s in report.susceptibility_profile if s.interpretation == "I")
+    r_count = sum(1 for s in report.susceptibility_profile if s.interpretation == "R")
+
+    total = len(report.susceptibility_profile)
+    return f"{total} antibiotics: {s_count}S/{i_count}I/{r_count}R"
+
+
 def reports_to_dataframe_rows(reports: List[CultureReport]) -> List[List[str]]:
     """Convert CultureReport list to list of list strings for gr.Dataframe."""
     rows = []
     for r in reports:
         warn = _WARN_PREFIX if _is_low_confidence(r) else ""
+        sus_summary = _format_susceptibility_summary(r)
         rows.append(
             [
                 f"{warn}{r.date}",
@@ -285,12 +299,13 @@ def reports_to_dataframe_rows(reports: List[CultureReport]) -> List[List[str]]:
                 r.organism,
                 str(r.cfu),
                 ", ".join(r.resistance_markers) if r.resistance_markers else "—",
+                sus_summary,
             ]
         )
     return rows
 
 
-def dataframe_row_to_culture_report(row: List[str]) -> CultureReport:
+def dataframe_row_to_culture_report(row: List[str], original_reports: List[CultureReport] = None) -> CultureReport:
     """Convert a single Dataframe row (list of strings) back to CultureReport."""
     from rules import normalize_organism
 
@@ -311,11 +326,22 @@ def dataframe_row_to_culture_report(row: List[str]) -> CultureReport:
         else []
     )
 
+    # Try to find matching original report to preserve susceptibility profile
+    susceptibility_profile = []
+    if original_reports:
+        for orig in original_reports:
+            # Match by organism (normalized) and CFU value
+            orig_organism = normalize_organism(orig.organism)
+            if orig_organism == organism and orig.cfu == cfu:
+                susceptibility_profile = orig.susceptibility_profile
+                break
+
     return CultureReport(
         date=date_str,
         organism=organism,
         cfu=cfu,
         resistance_markers=resistance_markers,
+        susceptibility_profile=susceptibility_profile,  # Preserved from original extraction
         specimen_type=specimen,
         contamination_flag=any(
             term in organism.lower() for term in RULES["contamination_terms"]
@@ -422,6 +448,7 @@ def process_uploaded_pdfs(
                     organism=report.organism,
                     cfu=report.cfu,
                     resistance_markers=report.resistance_markers,
+                    susceptibility_profile=report.susceptibility_profile,
                     specimen_type=report.specimen_type,
                     contamination_flag=report.contamination_flag,
                     raw_text=block,  # stored for accordion; never forwarded to MedGemma
@@ -524,13 +551,13 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         trend = analyze_trend(sorted_reports)
         hypothesis = generate_hypothesis(trend, len(sorted_reports))
         patient_response = call_medgemma(
-            trend, hypothesis, "patient", model, tokenizer, is_stub
+            trend, hypothesis, "patient", model, tokenizer, is_stub, sorted_reports
         )
         clinician_response = call_medgemma(
-            trend, hypothesis, "clinician", model, tokenizer, is_stub
+            trend, hypothesis, "clinician", model, tokenizer, is_stub, sorted_reports
         )
-        patient_out = render_patient_output(trend, hypothesis, patient_response)
-        clinician_out = render_clinician_output(trend, hypothesis, clinician_response)
+        patient_out = render_patient_output(trend, hypothesis, patient_response, sorted_reports)
+        clinician_out = render_clinician_output(trend, hypothesis, clinician_response, sorted_reports)
         return trend, patient_out, clinician_out
 
     def format_output_html(
@@ -547,6 +574,17 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 "<div class='alert-title'>✓ Resolution Detected</div>"
                 "<div class='alert-text'>"
                 "Bacterial load has cleared below detection threshold.</div>"
+                "</div>"
+            )
+
+        # Info alert for single reports
+        if patient_out.patient_trend_phrase and "single report" in patient_out.patient_trend_phrase.lower():
+            p_body += (
+                "<div style='background:#FDFAF7;border-left:3px solid #D4A574;padding:12px 14px;margin:12px 0;border-radius:6px;'>"
+                "<div style='font-size:0.85rem;font-weight:600;color:#7A6558;margin-bottom:4px;'>ℹ Single Report Analysis</div>"
+                "<div style='font-size:0.82rem;color:#5D4037;line-height:1.5;'>"
+                "This analysis is based on one culture report. For trend analysis (e.g., improving vs worsening infection), "
+                "upload 2-3 sequential reports using the <strong>↩ Edit & Re-upload</strong> button.</div>"
                 "</div>"
             )
 
@@ -1017,7 +1055,8 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
     ) as demo:
         gr.Markdown("# 🧫 CultureSense — Longitudinal Clinical Hypothesis Engine")
         gr.Markdown(
-            "Upload 2–3 sequential urine or stool culture reports to generate a trend analysis and clinical hypothesis."
+            "**Upload 2–3 sequential urine or stool culture reports** to analyze trends over time and generate a clinical hypothesis. "
+            "While the pipeline is designed for longitudinal analysis, single reports are also supported to help you understand your culture results."
         )
 
         with gr.Tabs():
@@ -1100,8 +1139,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             "Organism",
                             "CFU/mL",
                             "Resistance Markers",
+                            "Susceptibility Profile",
                         ],
-                        datatype=["str", "str", "str", "str", "str"],
+                        datatype=["str", "str", "str", "str", "str", "str"],
                         interactive=True,
                         wrap=True,
                         label="Extracted Culture Records",
@@ -1148,8 +1188,8 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 # ── Screen 3: Analysis Output ───────────────────────────────
                 with gr.Column(visible=False, elem_classes="screen") as screen_output:
                     gr.Markdown("### Step 3 — Analysis Results")
-                    output_patient_html = gr.HTML(value="")
-                    output_clinician_html = gr.HTML(value="")
+                    output_patient_md = gr.Markdown(value="")
+                    output_clinician_md = gr.Markdown(value="")
                     btn_start_over = gr.Button("🔄 Start Over")
 
                 # ── Event: Process PDFs ─────────────────────────────────────
@@ -1316,7 +1356,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 )
 
                 # ── Event: Confirm & Analyse ────────────────────────────────
-                def on_confirm(table_data, raw_blocks):
+                def on_confirm(table_data, raw_blocks, original_reports):
                     if table_data is None or len(table_data) == 0:
                         return (
                             gr.update(visible=True),
@@ -1363,7 +1403,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     confirmed_reports = []
                     for row in data_rows:
                         try:
-                            report = dataframe_row_to_culture_report(row)
+                            report = dataframe_row_to_culture_report(row, original_reports)
                             confirmed_reports.append(report)
                         except Exception:
                             pass
@@ -1398,13 +1438,13 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
 
                 btn_confirm.click(
                     fn=on_confirm,
-                    inputs=[confirm_table, state_raw_blocks],
+                    inputs=[confirm_table, state_raw_blocks, state_reports],
                     outputs=[
                         screen_confirm,
                         screen_upload,
                         screen_output,
-                        output_patient_html,
-                        output_clinician_html,
+                        output_patient_md,
+                        output_clinician_md,
                     ],
                 )
 
@@ -1532,8 +1572,8 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     lines=12,
                 )
                 btn_analyse_manual = gr.Button("🔬 Analyse", variant="primary")
-                manual_output_patient = gr.HTML()
-                manual_output_clinician = gr.HTML()
+                manual_output_patient = gr.Markdown()
+                manual_output_clinician = gr.Markdown()
 
                 def on_analyse_manual(text):
                     if not text or len(text.strip()) < 20:

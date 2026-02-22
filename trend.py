@@ -6,7 +6,7 @@ Computes TrendResult from a sorted list of CultureReport objects.
 from typing import List
 
 from data_models import CultureReport, TrendResult
-from rules import RULES, ORGANISM_ALIASES
+from rules import RULES, ORGANISM_ALIASES, ANTIBIOTIC_CLASSES
 
 
 # ---------------------------------------------------------------------------
@@ -84,13 +84,45 @@ def _check_resistance_evolution(reports: List[CultureReport]) -> bool:
 
 def _check_multi_drug_resistance(reports: List[CultureReport]) -> bool:
     """
-    Return True if any single report has 3 or more resistance markers.
+    Return True if any single report shows resistance to >= 2 antibiotic classes.
 
-    This indicates multi-drug resistant (MDR) organisms which require
-    specialized treatment considerations.
+    Multi-drug resistance (MDR) is defined as resistance to >= 2 distinct
+    antibiotic classes (not just 2 individual antibiotics). This function:
+        1. Checks high-risk resistance markers (ESBL, CRE, MRSA, VRE, CRKP)
+        2. Counts distinct antibiotic classes with resistance from susceptibility profile
+
+    Returns True if either condition indicates MDR pattern.
     """
-    threshold = RULES.get("multi_drug_threshold", 3)
-    return any(len(r.resistance_markers) >= threshold for r in reports)
+    # First check: high-risk markers always trigger MDR flag
+    high_risk_markers = set(RULES.get("high_risk_markers", []))
+    for r in reports:
+        if any(marker in high_risk_markers for marker in r.resistance_markers):
+            return True
+
+    # Second check: count distinct antibiotic classes with resistance
+    # MDR = resistance to >= 2 distinct classes
+    threshold = RULES.get("multi_drug_threshold", 2)
+
+    for r in reports:
+        resistant_classes = set()
+
+        for susc in r.susceptibility_profile:
+            # Normalize antibiotic name to lookup key
+            abx_key = susc.antibiotic.strip().lower()
+
+            # Check if this antibiotic shows resistance (handles "R" or "Resistant")
+            interp = susc.interpretation.upper()
+            if interp == "R" or interp == "RESISTANT":
+                # Map to antibiotic class
+                abx_class = ANTIBIOTIC_CLASSES.get(abx_key)
+                if abx_class:
+                    resistant_classes.add(abx_class)
+
+        # MDR if resistant to >= threshold distinct classes
+        if len(resistant_classes) >= threshold:
+            return True
+
+    return False
 
 
 def _build_resistance_timeline(reports: List[CultureReport]) -> List[List[str]]:
