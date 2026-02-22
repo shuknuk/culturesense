@@ -58,6 +58,12 @@ REASSURANCE_STATEMENT: str = (
     "Your doctor has full knowledge of your medical history and is best placed to guide your care."
 )
 
+CLINICIAN_DISCLAIMER: str = (
+    "This output represents a structured hypothesis for clinical review. "
+    "It is NOT a diagnosis and does NOT replace clinical judgment. "
+    "All interpretations require full patient context and physician evaluation."
+)
+
 
 def _build_antibiotics_explanation(trend: TrendResult) -> str:
     """
