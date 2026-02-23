@@ -1103,10 +1103,14 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             background: #F5F0EB !important;
             border: 1px solid #E8DDD6 !important;
             border-radius: 6px !important;
-            padding: 10px 14px 10px 24px !important;
+            padding: 10px 14px !important;
             font-family: system-ui, sans-serif !important;
             font-size: 0.82rem !important;
             margin-bottom: 16px !important;
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+            gap: 24px !important;
         }
         #pii_status, #medgemma_status {
             font-family: system-ui, sans-serif !important;
