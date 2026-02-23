@@ -28,7 +28,7 @@ from extraction import (
 )
 from hypothesis import generate_hypothesis
 from medgemma import call_medgemma
-from pii_removal import scrub_pii, detect_pii
+from pii_removal import detect_pii, scrub_pii
 from renderer import render_clinician_output, render_patient_output
 from rules import RULES
 from trend import analyze_trend
@@ -36,6 +36,7 @@ from trend import analyze_trend
 # ---------------------------------------------------------------------------
 # Resistance Timeline Renderer
 # ---------------------------------------------------------------------------
+
 
 def render_resistance_timeline(trend: TrendResult) -> str:
     # Defensive: ensure resistance_timeline is List[List[str]]
@@ -45,8 +46,9 @@ def render_resistance_timeline(trend: TrendResult) -> str:
     # Handle case where data might be serialized/deserialized through Gradio State
     # Gradio may convert lists to Python literal strings (single quotes) not JSON
     if isinstance(timeline, str):
-        import json
         import ast
+        import json
+
         try:
             # Try JSON first (double quotes)
             timeline = json.loads(timeline)
@@ -58,8 +60,9 @@ def render_resistance_timeline(trend: TrendResult) -> str:
                 timeline = []
 
     if isinstance(report_dates, str):
-        import json
         import ast
+        import json
+
         try:
             report_dates = json.loads(report_dates)
         except (json.JSONDecodeError, TypeError):
@@ -92,9 +95,12 @@ def render_resistance_timeline(trend: TrendResult) -> str:
         marker_str = ", ".join(markers) if markers else "None"
         rows.append(f"| {date} | {marker_str} |")
 
-    header = ("| Date | High-Risk Resistance Markers |\n"
-              "|------|------------------------------|")
+    header = (
+        "| Date | High-Risk Resistance Markers |\n"
+        "|------|------------------------------|"
+    )
     return header + "\n" + "\n".join(rows)
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -120,13 +126,11 @@ WARM_CLINICAL_THEME = gr.themes.Soft(
     body_background_fill="#FDFAF7",
     background_fill_primary="#FDFAF7",
     background_fill_secondary="#F5F0EB",
-
     # Warm gray borders (#E8DDD6)
     border_color_primary="#E8DDD6",
     block_border_color="#E8DDD6",
     input_border_color="#E8DDD6",
     input_border_color_hover="#E8DDD6",
-
     # Burnt sienna accent for active elements
     button_primary_background_fill="#C1622F",
     button_primary_background_fill_hover="#a85228",
@@ -135,17 +139,14 @@ WARM_CLINICAL_THEME = gr.themes.Soft(
     button_secondary_text_color="#5D4037",
     button_cancel_background_fill="#E8DDD6",
     button_cancel_text_color="#5D4037",
-
     # Form elements with warm gray styling
     checkbox_label_background_fill="#FDFAF7",
     checkbox_label_text_color="#5D4037",
     checkbox_label_text_color_selected="#C1622F",
     checkbox_border_color="#E8DDD6",
     checkbox_border_color_focus="#C1622F",
-
     # Accordion styling
     accordion_text_color="#C1622F",
-
     # Subtle shadows only (0 1px 4px with 7% opacity)
     block_shadow="0 1px 4px rgba(28,20,18,0.07)",
 )
@@ -305,7 +306,9 @@ def reports_to_dataframe_rows(reports: List[CultureReport]) -> List[List[str]]:
     return rows
 
 
-def dataframe_row_to_culture_report(row: List[str], original_reports: List[CultureReport] = None) -> CultureReport:
+def dataframe_row_to_culture_report(
+    row: List[str], original_reports: List[CultureReport] = None
+) -> CultureReport:
     """Convert a single Dataframe row (list of strings) back to CultureReport."""
     from rules import normalize_organism
 
@@ -574,8 +577,12 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
 
         if progress:
             progress(0.9, desc="Formatting output...")
-        patient_out = render_patient_output(trend, hypothesis, patient_response, sorted_reports)
-        clinician_out = render_clinician_output(trend, hypothesis, clinician_response, sorted_reports)
+        patient_out = render_patient_output(
+            trend, hypothesis, patient_response, sorted_reports
+        )
+        clinician_out = render_clinician_output(
+            trend, hypothesis, clinician_response, sorted_reports
+        )
 
         if progress:
             progress(1.0, desc="Complete!")
@@ -583,7 +590,10 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         return trend, patient_out, clinician_out
 
     def format_output_html(
-        patient_out, clinician_out, trend: TrendResult = None, raw_blocks: List[str] = None
+        patient_out,
+        clinician_out,
+        trend: TrendResult = None,
+        raw_blocks: List[str] = None,
     ) -> Tuple[str, str]:
         """Convert FormattedOutput objects to display HTML — clinical SaaS styling."""
         # ── Patient card ───────────────────────────────────────────────────
@@ -612,7 +622,10 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 )
 
         # Info alert for single reports
-        if patient_out.patient_trend_phrase and "single report" in patient_out.patient_trend_phrase.lower():
+        if (
+            patient_out.patient_trend_phrase
+            and "single report" in patient_out.patient_trend_phrase.lower()
+        ):
             p_body += (
                 "<div style='background:#FDFAF7;border-left:3px solid #D4A574;padding:12px 14px;margin:12px 0;border-radius:6px;'>"
                 "<div style='font-size:0.85rem;font-weight:600;color:#7A6558;margin-bottom:4px;'>ℹ Single Report Analysis</div>"
@@ -651,8 +664,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 f"{patient_out.patient_disclaimer}</p></div>"
             )
         patient_html = (
-            "<div class='output-card'>"
-            "<h3>📋 Patient Summary</h3>" + p_body + "</div>"
+            "<div class='output-card'><h3>📋 Patient Summary</h3>" + p_body + "</div>"
         )
 
         # ── Clinician card ─────────────────────────────────────────────────
@@ -1085,13 +1097,66 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         .accordion-header:hover {
             color: #2563EB !important;
         }
+
+        /* Status Indicator Panel */
+        .status-panel-container {
+            background: #F5F0EB !important;
+            border: 1px solid #E8DDD6 !important;
+            border-radius: 6px !important;
+            padding: 10px 14px 10px 24px !important;
+            font-family: system-ui, sans-serif !important;
+            font-size: 0.82rem !important;
+            margin-bottom: 16px !important;
+        }
+        #pii_status, #medgemma_status {
+            font-family: system-ui, sans-serif !important;
+            font-size: 0.82rem !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        /* Status Light Indicators */
+        .status-light {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .status-light-white {
+            background: #D1D5DB;
+            border: 1px solid #9CA3AF;
+        }
+        .status-light-green {
+            background: #22C55E;
+            box-shadow: 0 0 6px 2px rgba(34, 197, 94, 0.5);
+        }
+        .status-light-blue {
+            background: #3B82F6;
+            box-shadow: 0 0 6px 2px rgba(59, 130, 246, 0.5);
+        }
     """,
     ) as demo:
-        gr.Markdown("# 🧫 CultureSense — Longitudinal Clinical Hypothesis Engine\n\n*Powered by MedGemma 4B-IT*")
+        gr.Markdown(
+            "# 🧫 CultureSense — Longitudinal Clinical Hypothesis Engine\n\n*Powered by MedGemma 4B-IT*"
+        )
         gr.Markdown(
             "**Upload 2–3 sequential urine or stool culture reports** to analyze trends over time and generate a clinical hypothesis. "
             "While the pipeline is designed for longitudinal analysis, single reports are also supported to help you understand your culture results."
         )
+
+        # ── Pipeline Status Indicators ──────────────────────────────────────────────
+        with gr.Row(
+            visible=False, elem_classes="status-panel-container"
+        ) as status_indicator_panel:
+            pii_status = gr.Markdown(
+                value='<span class="status-light status-light-white"></span>Awaiting upload...',
+                elem_id="pii_status",
+            )
+            medgemma_status = gr.Markdown(
+                value='<span class="status-light status-light-white"></span>Awaiting analysis...',
+                elem_id="medgemma_status",
+            )
 
         with gr.Tabs():
             # ================================================================
@@ -1276,6 +1341,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             gr.update(visible=True),  # btn_process
                             gr.update(visible=False),  # btn_process_loading
                             gr.update(visible=False),  # loading_html
+                            gr.update(visible=False),  # status_indicator_panel
+                            '<span class="status-light status-light-white"></span>Awaiting upload...',  # pii_status
+                            '<span class="status-light status-light-white"></span>Awaiting analysis...',  # medgemma_status
                         )
 
                     reports, raw_blocks, statuses, trunc_warn, debug_log = (
@@ -1286,15 +1354,15 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     status_header = (
                         f'<div style="margin-bottom:8px;padding:8px 12px;background:#f0f0f0;'
                         f'border-radius:4px;font-weight:500;">'
-                        f'📄 {pdf_count} PDF{"s" if pdf_count != 1 else ""} uploaded</div>'
+                        f"📄 {pdf_count} PDF{'s' if pdf_count != 1 else ''} uploaded</div>"
                     )
                     status_combined = status_header + "".join(statuses)
 
                     if not reports:
                         # All files failed — stay on screen 1, show error panel
                         error_msg = (
-                            status_header +
-                            '<div style="padding:12px;background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;color:#721c24;">'
+                            status_header
+                            + '<div style="padding:12px;background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;color:#721c24;">'
                             "<strong>✗ No valid culture data found</strong><br>"
                             "Please check the debug output below for details."
                             "</div>"
@@ -1316,6 +1384,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             gr.update(visible=True),  # btn_process
                             gr.update(visible=False),  # btn_process_loading
                             gr.update(visible=False),  # loading_html
+                            gr.update(visible=False),  # status_indicator_panel
+                            '<span class="status-light status-light-white"></span>Awaiting upload...',  # pii_status
+                            '<span class="status-light status-light-white"></span>Awaiting analysis...',  # medgemma_status
                         )
 
                     # Build dataframe rows
@@ -1352,6 +1423,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         gr.update(visible=True),  # btn_process
                         gr.update(visible=False),  # btn_process_loading
                         gr.update(visible=False),  # loading_html
+                        gr.update(visible=True),  # status_indicator_panel
+                        '<span class="status-light status-light-green"></span>PII/PHI removed — all patient identifiers redacted',  # pii_status
+                        '<span class="status-light status-light-white"></span>Awaiting analysis...',  # medgemma_status
                     )
 
                 # Chain the events: first show loading, then process
@@ -1386,11 +1460,20 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         btn_process,
                         btn_process_loading,
                         loading_html,
+                        status_indicator_panel,
+                        pii_status,
+                        medgemma_status,
                     ],
                 )
 
                 # ── Event: Confirm & Analyse ────────────────────────────────
-                def on_confirm(table_data, raw_blocks, original_reports, progress=gr.Progress()):
+                def on_confirm_start():
+                    """Show analyzing status immediately when confirm button is clicked."""
+                    return '<span class="status-light status-light-blue"></span>MedGemma analyzing...'
+
+                def on_confirm(
+                    table_data, raw_blocks, original_reports, progress=gr.Progress()
+                ):
                     if table_data is None or len(table_data) == 0:
                         return (
                             gr.update(visible=True),
@@ -1398,6 +1481,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             gr.update(visible=False),
                             "<p style='color:#c0392b'>No records to analyse.</p>",
                             "",
+                            '<span class="status-light status-light-white"></span>Awaiting analysis...',  # medgemma_status (no change)
                         )
 
                     # Handle different DataFrame formats from Gradio
@@ -1405,10 +1489,11 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     rows = []
                     try:
                         import pandas as pd
+
                         if isinstance(table_data, pd.DataFrame):
                             # Convert DataFrame to list of lists (values only, no headers)
                             rows = table_data.values.tolist()
-                        elif hasattr(table_data, 'tolist'):
+                        elif hasattr(table_data, "tolist"):
                             # numpy array or similar
                             rows = table_data.tolist()
                         elif isinstance(table_data, (list, tuple)):
@@ -1416,12 +1501,21 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         else:
                             rows = []
                     except Exception as e:
-                        logging.warning(f"DEBUG on_confirm: error converting table_data: {e}")
+                        logging.warning(
+                            f"DEBUG on_confirm: error converting table_data: {e}"
+                        )
                         rows = []
 
                     # Filter out header rows and invalid data
                     # Headers are typically: ["Date", "Specimen", "Organism", "CFU/mL", "Resistance Markers"]
-                    header_indicators = ["Date", "date", "Specimen", "Organism", "CFU", "Resistance"]
+                    header_indicators = [
+                        "Date",
+                        "date",
+                        "Specimen",
+                        "Organism",
+                        "CFU",
+                        "Resistance",
+                    ]
                     data_rows = []
                     for row in rows:
                         # Skip if row is not a list/tuple
@@ -1429,7 +1523,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             continue
                         # Skip header rows - check if first cell contains header text
                         first_cell = str(row[0]) if row[0] is not None else ""
-                        if any(indicator in first_cell for indicator in header_indicators):
+                        if any(
+                            indicator in first_cell for indicator in header_indicators
+                        ):
                             continue
                         data_rows.append(row)
 
@@ -1437,7 +1533,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     confirmed_reports = []
                     for row in data_rows:
                         try:
-                            report = dataframe_row_to_culture_report(row, original_reports)
+                            report = dataframe_row_to_culture_report(
+                                row, original_reports
+                            )
                             confirmed_reports.append(report)
                         except Exception:
                             pass
@@ -1449,10 +1547,13 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             gr.update(visible=False),
                             "<p style='color:#c0392b'>Could not parse records.</p>",
                             "",
+                            '<span class="status-light status-light-white"></span>Awaiting analysis...',  # medgemma_status (no change)
                         )
 
                     try:
-                        trend, patient_out, clinician_out = run_pipeline(confirmed_reports, progress)
+                        trend, patient_out, clinician_out = run_pipeline(
+                            confirmed_reports, progress
+                        )
                         patient_html, clinician_html = format_output_html(
                             patient_out, clinician_out, trend, raw_blocks
                         )
@@ -1468,9 +1569,15 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         gr.update(visible=True),  # show screen_output
                         patient_html,
                         clinician_html,
+                        '<span class="status-light status-light-blue"></span>Analysis complete',  # medgemma_status
                     )
 
+                # Chain the events: first show analyzing status, then run pipeline
                 btn_confirm.click(
+                    fn=on_confirm_start,
+                    inputs=[],
+                    outputs=[medgemma_status],
+                ).then(
                     fn=on_confirm,
                     inputs=[confirm_table, state_raw_blocks, state_reports],
                     outputs=[
@@ -1479,6 +1586,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         screen_output,
                         output_patient_md,
                         output_clinician_md,
+                        medgemma_status,
                     ],
                 )
 
@@ -1538,6 +1646,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         "",  # clear status_html
                         None,  # clear pdf_upload
                         "",  # clear debug_output
+                        gr.update(visible=False),  # hide status_indicator_panel
+                        '<span class="status-light status-light-white"></span>Awaiting upload...',  # reset pii_status
+                        '<span class="status-light status-light-white"></span>Awaiting analysis...',  # reset medgemma_status
                     )
 
                 btn_start_over.click(
@@ -1553,6 +1664,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         status_html,
                         pdf_upload,
                         debug_output,
+                        status_indicator_panel,
+                        pii_status,
+                        medgemma_status,
                     ],
                 )
 
