@@ -10,11 +10,12 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from data_models import TrendResult, HypothesisResult, FormattedOutput
+from data_models import FormattedOutput, HypothesisResult, TrendResult
 
 # Heatmap is optional - gracefully handle if matplotlib not available
 try:
     from heatmap import generate_resistance_heatmap, get_heatmap_html
+
     HEATMAP_AVAILABLE = True
 except ImportError:
     HEATMAP_AVAILABLE = False
@@ -24,6 +25,7 @@ except ImportError:
 # Import heatmap module (optional - gracefully handles missing matplotlib)
 try:
     from heatmap import generate_resistance_heatmap, get_heatmap_html
+
     HEATMAP_AVAILABLE = True
 except ImportError:
     HEATMAP_AVAILABLE = False
@@ -77,13 +79,13 @@ def _build_resistance_explanation_patient(reports: list) -> Optional[str]:
         return None
 
     # Collect all susceptibility data from reports
-    effective = []      # Interpretation "S" (Sensitive)
+    effective = []  # Interpretation "S" (Sensitive)
     not_effective = []  # Interpretation "R" (Resistant) or "I" (Intermediate)
 
     seen = set()  # Track unique antibiotic names to avoid duplicates
 
     for report in reports:
-        if hasattr(report, 'susceptibility_profile') and report.susceptibility_profile:
+        if hasattr(report, "susceptibility_profile") and report.susceptibility_profile:
             for sus in report.susceptibility_profile:
                 abx_name = sus.antibiotic.strip()
                 interp = sus.interpretation.upper()
@@ -108,28 +110,28 @@ def _build_resistance_explanation_patient(reports: list) -> Optional[str]:
     effective = sorted(effective, key=str.lower)
     not_effective = sorted(not_effective, key=str.lower)
 
-    # Build markdown table with aligned columns
-    # Determine the number of rows needed (max of the two columns)
-    max_rows = max(len(effective), len(not_effective))
-
+    # Build clean markdown table - list all antibiotics in each category
+    # Each category gets its own section with "None identified" only once if empty
     lines = [
-        "| ✅ Effective | ❌ Not Effective |",
-        "|--------------|------------------|",
+        "| ✅ Effective |",
+        "|--------------|",
     ]
 
-    for i in range(max_rows):
-        eff = effective[i] if i < len(effective) else ""
-        not_eff = not_effective[i] if i < len(not_effective) else ""
+    if effective:
+        for abx in effective:
+            lines.append(f"| {abx} |")
+    else:
+        lines.append(f"| None identified |")
 
-        # Handle case where one column is empty
-        if not eff and not not_eff:
-            break
-        if not eff:
-            eff = "None identified"
-        if not not_eff:
-            not_eff = "None identified"
+    lines.append("")
+    lines.append("| ❌ Not Effective |")
+    lines.append("|------------------|")
 
-        lines.append(f"| {eff} | {not_eff} |")
+    if not_effective:
+        for abx in not_effective:
+            lines.append(f"| {abx} |")
+    else:
+        lines.append(f"| None identified |")
 
     return "\n".join(lines)
 
@@ -269,7 +271,7 @@ def _parse_hypotheses_table(medgemma_response: str) -> str:
     if not medgemma_response:
         return ""
 
-    lines = medgemma_response.strip().split('\n')
+    lines = medgemma_response.strip().split("\n")
 
     hypotheses = []  # List of dicts: {name, confidence, evidence}
     current_hypothesis = None
@@ -280,34 +282,38 @@ def _parse_hypotheses_table(medgemma_response: str) -> str:
             continue
 
         # Match "Hypothesis 1: Name" or "Hypothesis N: Name"
-        hyp_match = re.match(r'Hypothesis\s+\d+:\s*(.+)', line, re.IGNORECASE)
+        hyp_match = re.match(r"Hypothesis\s+\d+:\s*(.+)", line, re.IGNORECASE)
         if hyp_match:
             if current_hypothesis:
                 hypotheses.append(current_hypothesis)
             current_hypothesis = {
-                'name': hyp_match.group(1).strip(),
-                'confidence': None,
-                'evidence': None
+                "name": hyp_match.group(1).strip(),
+                "confidence": None,
+                "evidence": None,
             }
             continue
 
         # Match "Confidence: 0.85" or "Confidence: 85%"
-        if current_hypothesis and 'confidence' in line.lower():
-            conf_match = re.search(r'Confidence[:\s]+([\d.]+)', line, re.IGNORECASE)
+        if current_hypothesis and "confidence" in line.lower():
+            conf_match = re.search(r"Confidence[:\s]+([\d.]+)", line, re.IGNORECASE)
             if conf_match:
                 conf_val = float(conf_match.group(1))
                 # Convert 0-1 to percentage if needed
                 if conf_val <= 1.0:
-                    current_hypothesis['confidence'] = int(conf_val * 100)
+                    current_hypothesis["confidence"] = int(conf_val * 100)
                 else:
-                    current_hypothesis['confidence'] = int(conf_val)
+                    current_hypothesis["confidence"] = int(conf_val)
             continue
 
         # Capture first bullet point under "Supporting Evidence"
-        if current_hypothesis and line.startswith('- ') and current_hypothesis['evidence'] is None:
+        if (
+            current_hypothesis
+            and line.startswith("- ")
+            and current_hypothesis["evidence"] is None
+        ):
             # Skip "Supporting Evidence:" header line
-            if 'supporting evidence' not in line.lower():
-                current_hypothesis['evidence'] = line[2:].strip()  # Remove "- " prefix
+            if "supporting evidence" not in line.lower():
+                current_hypothesis["evidence"] = line[2:].strip()  # Remove "- " prefix
             continue
 
     # Don't forget the last hypothesis
@@ -319,40 +325,40 @@ def _parse_hypotheses_table(medgemma_response: str) -> str:
 
     # Build markdown table with dynamic column count
     # Header row: empty cell + one cell per hypothesis
-    header_cells = [''] + [f"**Hypothesis {i+1}**" for i in range(len(hypotheses))]
-    header = '| ' + ' | '.join(header_cells) + ' |'
+    header_cells = [""] + [f"**Hypothesis {i + 1}**" for i in range(len(hypotheses))]
+    header = "| " + " | ".join(header_cells) + " |"
 
     # Separator
-    separator = '|' + '|'.join(['---'] * (len(hypotheses) + 1)) + '|'
+    separator = "|" + "|".join(["---"] * (len(hypotheses) + 1)) + "|"
 
     # Assessment row
-    assessment_cells = ['**Assessment**'] + [h['name'] for h in hypotheses]
-    assessment_row = '| ' + ' | '.join(assessment_cells) + ' |'
+    assessment_cells = ["**Assessment**"] + [h["name"] for h in hypotheses]
+    assessment_row = "| " + " | ".join(assessment_cells) + " |"
 
     # Confidence row
-    confidence_cells = ['**Confidence**']
+    confidence_cells = ["**Confidence**"]
     for h in hypotheses:
-        conf = h.get('confidence')
+        conf = h.get("confidence")
         if conf is not None:
             confidence_cells.append(f"{conf}%")
         else:
             confidence_cells.append("—")
-    confidence_row = '| ' + ' | '.join(confidence_cells) + ' |'
+    confidence_row = "| " + " | ".join(confidence_cells) + " |"
 
     # Evidence row (first bullet only)
-    evidence_cells = ['**Key Evidence**']
+    evidence_cells = ["**Key Evidence**"]
     for h in hypotheses:
-        ev = h.get('evidence')
+        ev = h.get("evidence")
         if ev:
             # Truncate long evidence strings
             if len(ev) > 50:
-                ev = ev[:47] + '...'
+                ev = ev[:47] + "..."
             evidence_cells.append(ev)
         else:
             evidence_cells.append("—")
-    evidence_row = '| ' + ' | '.join(evidence_cells) + ' |'
+    evidence_row = "| " + " | ".join(evidence_cells) + " |"
 
-    table = '\n'.join([header, separator, assessment_row, confidence_row, evidence_row])
+    table = "\n".join([header, separator, assessment_row, confidence_row, evidence_row])
     return table
 
 
@@ -401,8 +407,9 @@ def render_clinician_output(
     resistance_timeline = trend.resistance_timeline
 
     if isinstance(report_dates, str):
-        import json
         import ast
+        import json
+
         try:
             report_dates = json.loads(report_dates)
         except (json.JSONDecodeError, TypeError):
@@ -412,8 +419,9 @@ def render_clinician_output(
                 report_dates = []
 
     if isinstance(resistance_timeline, str):
-        import json
         import ast
+        import json
+
         try:
             resistance_timeline = json.loads(resistance_timeline)
         except (json.JSONDecodeError, TypeError):
@@ -443,8 +451,7 @@ def render_clinician_output(
     resistance_heatmap: Optional[str] = None
     if has_any_resistance and generate_resistance_heatmap is not None:
         resistance_heatmap = generate_resistance_heatmap(
-            trend.resistance_timeline,
-            trend.report_dates
+            trend.resistance_timeline, trend.report_dates
         )
 
     # Build susceptibility profile detail from reports
@@ -452,14 +459,21 @@ def render_clinician_output(
     if reports:
         sus_lines = []
         for report in reports:
-            if hasattr(report, 'susceptibility_profile') and report.susceptibility_profile:
+            if (
+                hasattr(report, "susceptibility_profile")
+                and report.susceptibility_profile
+            ):
                 sus_lines.append(f"\n{report.date} - {report.organism}:")
                 sus_lines.append("  Antibiotic | MIC | Result")
                 sus_lines.append("  " + "-" * 40)
                 for sus in report.susceptibility_profile:
-                    sus_lines.append(f"  {sus.antibiotic:<20} | {sus.mic:<10} | {sus.interpretation}")
+                    sus_lines.append(
+                        f"  {sus.antibiotic:<20} | {sus.mic:<10} | {sus.interpretation}"
+                    )
         if sus_lines:
-            susceptibility_detail = "Antimicrobial Susceptibility Profile:\n" + "\n".join(sus_lines)
+            susceptibility_detail = (
+                "Antimicrobial Susceptibility Profile:\n" + "\n".join(sus_lines)
+            )
 
     # Build hypotheses summary table and prepend to full MedGemma response
     hypotheses_table = _parse_hypotheses_table(medgemma_response)
@@ -500,7 +514,7 @@ def display_output(
     html = _build_html(patient_out, clinician_out, scenario_name)
 
     try:
-        from IPython.display import display, HTML
+        from IPython.display import HTML, display
 
         display(HTML(html))
     except ImportError:
@@ -555,9 +569,7 @@ def _build_html(
     # ---- Confidence bar ----
     conf_val = clinician_out.clinician_confidence
     conf_pct_num = int((conf_val or 0) * 100)
-    conf_label = (
-        f"{conf_val:.0%}" if conf_val is not None else "N/A"
-    )
+    conf_label = f"{conf_val:.0%}" if conf_val is not None else "N/A"
     conf_bar_html = f"""
     <div style="margin:12px 0 16px;">
       <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:5px;">
@@ -599,7 +611,7 @@ def _build_html(
         </div>
         <p style="margin:16px 0 6px 0;font-family:system-ui,sans-serif;font-size:0.78rem;font-weight:600;color:#7A6558;text-transform:uppercase;letter-spacing:.05em;">Questions to ask your doctor</p>
         <ul style="padding-left:18px;color:#4A3728;font-size:0.94rem;line-height:1.85;margin:0;">
-          {questions_html.replace('<li>', '<li style="margin-bottom:4px;">')}
+          {questions_html.replace("<li>", '<li style="margin-bottom:4px;">')}
         </ul>
         <div style="margin-top:18px;padding:10px 14px;border:1px solid #E8DDD6;border-radius:3px;background:#F5F0EB;">
           <p style="font-family:system-ui,sans-serif;font-size:0.78rem;font-style:italic;color:#9A8578;margin:0;line-height:1.6;">{patient_out.patient_disclaimer}</p>
