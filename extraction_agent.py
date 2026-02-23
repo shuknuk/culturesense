@@ -1103,20 +1103,24 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             background: #F5F0EB !important;
             border: 1px solid #E8DDD6 !important;
             border-radius: 6px !important;
-            padding: 10px 14px !important;
+            padding: 12px 20px 12px 24px !important;
             font-family: system-ui, sans-serif !important;
             font-size: 0.82rem !important;
             margin-bottom: 16px !important;
             display: flex !important;
             justify-content: center !important;
             align-items: center !important;
-            gap: 24px !important;
+            gap: 32px !important;
+            overflow: visible !important;
         }
         #pii_status, #medgemma_status {
             font-family: system-ui, sans-serif !important;
             font-size: 0.82rem !important;
-            margin: 0 !important;
+            margin: 0 0 0 8px !important;
             padding: 0 !important;
+        }
+        #pii_status .status-light, #medgemma_status .status-light {
+            margin-left: 4px !important;
         }
         /* Status Light Indicators */
         .status-light {
@@ -1126,6 +1130,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
             border-radius: 50%;
             margin-right: 6px;
             vertical-align: middle;
+            flex-shrink: 0;
         }
         .status-light-white {
             background: #D1D5DB;
@@ -1138,6 +1143,10 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         .status-light-blue {
             background: #3B82F6;
             box-shadow: 0 0 6px 2px rgba(59, 130, 246, 0.5);
+        }
+        /* Ensure no clipping on status panel */
+        .status-panel-container > div {
+            overflow: visible !important;
         }
     """,
     ) as demo:
