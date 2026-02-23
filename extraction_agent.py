@@ -589,15 +589,27 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         # ── Patient card ───────────────────────────────────────────────────
         p_body = ""
 
-        # Green resolution alert for cleared/resolution trends
-        if patient_out.patient_trend_phrase and "resolution" in patient_out.patient_trend_phrase.lower():
-            p_body += (
-                "<div class='alert-resolution'>"
-                "<div class='alert-title'>✓ Resolution Detected</div>"
-                "<div class='alert-text'>"
-                "Bacterial load has cleared below detection threshold.</div>"
-                "</div>"
-            )
+        # Green improvement alerts for decreasing or cleared trends
+        if patient_out.patient_trend_phrase:
+            phrase_lower = patient_out.patient_trend_phrase.lower()
+            if "downward trend" in phrase_lower:
+                # Decreasing trend - improving infection response
+                p_body += (
+                    "<div class='alert-resolution'>"
+                    "<div class='alert-title'>✓ Improving Infection Response</div>"
+                    "<div class='alert-text'>"
+                    "Declining bacterial counts suggest treatment is working.</div>"
+                    "</div>"
+                )
+            elif "resolution" in phrase_lower:
+                # Cleared trend - resolution detected
+                p_body += (
+                    "<div class='alert-resolution'>"
+                    "<div class='alert-title'>✓ Resolution Detected</div>"
+                    "<div class='alert-text'>"
+                    "Bacterial load has cleared below detection threshold.</div>"
+                    "</div>"
+                )
 
         # Info alert for single reports
         if patient_out.patient_trend_phrase and "single report" in patient_out.patient_trend_phrase.lower():
