@@ -176,17 +176,16 @@ def generate_hypothesis(trend: TrendResult, report_count: int) -> HypothesisResu
     confidence = _score_confidence(trend, report_count)
     risk_flags = _assign_risk_flags(trend, report_count)
     interpretation = _build_interpretation(trend, report_count)
-    # Stewardship alert: fire if ANY of these are true (per CLAUDE.md Section 5.4):
-    # - Resistance increases between sequential reports (resistance_evolution)
-    # - 2-class resistance detected (multi_drug_resistance)
-    # - ESBL, CRE, MRSA, VRE, CRKP markers (tracked in resistance_timeline)
-    # - Recurrent same organism within 30 days (recurrent_organism_30d)
-    # Note: stewardship alert is suppressed if trend is cleared
+    # Stewardship alert fires when:
+    # 1. Resistance EVOLUTION detected (new resistances appearing), OR
+    # 2. Multi-drug resistance AND infection NOT improving (CFU not decreasing/cleared), OR
+    # 3. Recurrent organism within 30 days
+    # Note: Baseline MDR with improving infection does NOT trigger alert (treatment is working)
     stewardship_alert = (
         trend.cfu_trend not in ("cleared",)
         and (
             trend.resistance_evolution
-            or trend.multi_drug_resistance
+            or (trend.multi_drug_resistance and trend.cfu_trend not in ("decreasing", "cleared"))
             or trend.recurrent_organism_30d
         )
     )

@@ -157,6 +157,58 @@ t9 = analyze_trend(rpts9)
 _assert(t9.any_contamination is True, f"any_contamination == True")
 
 # ---------------------------------------------------------------------------
+# 10. Sequential monitoring - should NOT be flagged as recurrence
+# ---------------------------------------------------------------------------
+print("\n=== Test: Sequential Monitoring (NOT Recurrence) ===")
+# Same organism across 3 reports, CFU decreasing, all within 30 days
+# This is treatment tracking, NOT recurrence
+rpts10 = [
+    _make_report(150000, organism="Escherichia coli", date="2026-02-01"),
+    _make_report(45000, organism="Escherichia coli", date="2026-02-08"),
+    _make_report(3000, organism="Escherichia coli", date="2026-02-15"),
+]
+t10 = analyze_trend(rpts10)
+_assert(
+    t10.recurrent_organism_30d is False,
+    f"recurrent_organism_30d == False for sequential monitoring  (got {t10.recurrent_organism_30d})",
+)
+_assert(t10.cfu_trend == "decreasing", f"trend == 'decreasing'  (got '{t10.cfu_trend}')")
+
+# ---------------------------------------------------------------------------
+# 11. True recurrence - cleared then reappears within 30 days
+# ---------------------------------------------------------------------------
+print("\n=== Test: True Recurrence (Cleared → Reappears) ===")
+# Report 1: Active infection
+# Report 2: Cleared (CFU ≤ 1000)
+# Report 3: Same organism reappears - THIS IS RECURRENCE
+rpts11 = [
+    _make_report(100000, organism="Escherichia coli", date="2026-02-01"),
+    _make_report(500, organism="Escherichia coli", date="2026-02-08"),  # Cleared
+    _make_report(50000, organism="Escherichia coli", date="2026-02-20"),  # Recurrence!
+]
+t11 = analyze_trend(rpts11)
+_assert(
+    t11.recurrent_organism_30d is True,
+    f"recurrent_organism_30d == True for true recurrence  (got {t11.recurrent_organism_30d})",
+)
+
+# ---------------------------------------------------------------------------
+# 12. Recurrence outside 30-day window - should NOT flag
+# ---------------------------------------------------------------------------
+print("\n=== Test: Recurrence Outside 30-Day Window ===")
+# Same pattern as test 11, but more than 30 days between cleared and reappearance
+rpts12 = [
+    _make_report(100000, organism="Escherichia coli", date="2026-01-01"),
+    _make_report(500, organism="Escherichia coli", date="2026-01-10"),  # Cleared
+    _make_report(50000, organism="Escherichia coli", date="2026-02-20"),  # 41 days later
+]
+t12 = analyze_trend(rpts12)
+_assert(
+    t12.recurrent_organism_30d is False,
+    f"recurrent_organism_30d == False for recurrence > 30 days  (got {t12.recurrent_organism_30d})",
+)
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 print(f"\n{'=' * 50}")

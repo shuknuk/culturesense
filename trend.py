@@ -132,31 +132,33 @@ def _build_resistance_timeline(reports: List[CultureReport]) -> List[List[str]]:
 
 def _check_recurrent_organism(reports: List[CultureReport]) -> bool:
     """
-    Return True if the same organism appears in reports within 30 days.
+    Return True if the same organism recurs after apparent resolution.
 
-    Per CLAUDE.md Section 5.4: stewardship alert fires when there's a
-    "Recurrent same organism within 30 days" - indicating possible treatment
-    failure or relapse.
+    Recurrence means:
+        1. A prior report showed cleared/no growth (CFU ≤ cleared_threshold), AND
+        2. The same organism reappears in a later report within 30 days
 
-    Logic:
-        - Requires at least 2 reports with dates
-        - Check if normalized organism names match
-        - Check if any reports are within 30 days of each other
+    Sequential monitoring of the same infection (same organism across reports
+    without clearing) is NOT recurrence - it's treatment tracking.
+
+    This is important for stewardship alerts: we only want to flag true
+    relapse/recurrence scenarios, not normal treatment monitoring.
     """
     if len(reports) < 2:
         return False
 
-    # Get reports with valid dates
+    # Get reports with valid dates, including CFU for resolution check
+    from datetime import datetime, timedelta
+
     dated_reports = []
     for r in reports:
         if r.date and r.date not in ("unknown", ""):
             try:
-                from datetime import datetime
                 date_obj = datetime.strptime(r.date, "%Y-%m-%d")
                 normalized_org = ORGANISM_ALIASES.get(
                     r.organism.strip().lower(), r.organism.strip().lower()
                 )
-                dated_reports.append((date_obj, normalized_org))
+                dated_reports.append((date_obj, normalized_org, r.cfu))
             except (ValueError, AttributeError):
                 continue
 
@@ -166,17 +168,24 @@ def _check_recurrent_organism(reports: List[CultureReport]) -> bool:
     # Sort by date
     dated_reports.sort(key=lambda x: x[0])
 
-    # Check for same organism within 30 days
-    from datetime import timedelta
+    # Check for recurrence: cleared → same organism reappears
+    cleared_threshold = RULES.get("cleared_threshold", 1000)
 
     for i in range(len(dated_reports)):
-        for j in range(i + 1, len(dated_reports)):
-            date_i, org_i = dated_reports[i]
-            date_j, org_j = dated_reports[j]
+        date_i, org_i, cfu_i = dated_reports[i]
 
-            # Check if same organism and within 30 days
-            if org_i == org_j and (date_j - date_i) <= timedelta(days=30):
-                return True
+        # Check if this report showed resolution
+        is_resolved = cfu_i <= cleared_threshold
+
+        if is_resolved:
+            # Check if same organism appears again later
+            for j in range(i + 1, len(dated_reports)):
+                date_j, org_j, cfu_j = dated_reports[j]
+
+                # Recurrence: cleared → same organism reappears (above threshold)
+                if org_i == org_j and cfu_j > cleared_threshold:
+                    if (date_j - date_i) <= timedelta(days=30):
+                        return True
 
     return False
 
