@@ -1087,7 +1087,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         }
     """,
     ) as demo:
-        gr.Markdown("# 🧫 CultureSense — Longitudinal Clinical Hypothesis Engine")
+        gr.Markdown("# 🧫 CultureSense — Longitudinal Clinical Hypothesis Engine\n\n*Powered by MedGemma 4B-IT*")
         gr.Markdown(
             "**Upload 2–3 sequential urine or stool culture reports** to analyze trends over time and generate a clinical hypothesis. "
             "While the pipeline is designed for longitudinal analysis, single reports are also supported to help you understand your culture results."
