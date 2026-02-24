@@ -10,12 +10,12 @@ Three-screen state machine:
 Tab B (manual entry) is the existing flow — zero modifications.
 """
 
-import os
-import tempfile
+import logging
+import logging
 import time
 import warnings
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import gradio as gr
 
@@ -24,7 +24,6 @@ from extraction import (
     ExtractionError,
     debug_extraction,
     extract_structured_data,
-    extract_structured_data_with_fallback,
 )
 from hypothesis import generate_hypothesis
 from medgemma import call_medgemma
