@@ -82,6 +82,42 @@ def _check_resistance_evolution(reports: List[CultureReport]) -> bool:
     return bool(later_markers - baseline)
 
 
+def _check_susceptibility_evolution(reports: List[CultureReport]) -> tuple:
+    """
+    Detect S→I, S→R, or I→R transitions for the same antibiotic.
+
+    Returns:
+        (has_evolution, evolved_antibiotics)
+        - has_evolution: True if any worsening transition detected
+        - evolved_antibiotics: List of antibiotics that evolved resistance
+    """
+    if len(reports) < 2:
+        return False, []
+
+    # Build baseline from first report
+    baseline: dict = {}  # antibiotic -> interpretation
+    for susc in reports[0].susceptibility_profile:
+        abx = susc.antibiotic.strip().lower()
+        baseline[abx] = susc.interpretation.upper()
+
+    # Check subsequent reports for evolution
+    evolved = []
+    for r in reports[1:]:
+        for susc in r.susceptibility_profile:
+            abx = susc.antibiotic.strip().lower()
+            current = susc.interpretation.upper()
+
+            if abx in baseline:
+                prev = baseline[abx]
+                # Detect worsening: S→I, S→R, I→R
+                if (prev == "S" and current in ("I", "R")) or \
+                   (prev == "I" and current == "R"):
+                    if abx not in [a.lower() for a in evolved]:
+                        evolved.append(susc.antibiotic.strip())  # Preserve original case
+
+    return len(evolved) > 0, evolved
+
+
 def _check_multi_drug_resistance(reports: List[CultureReport]) -> bool:
     """
     Return True if any single report shows resistance to >= 2 antibiotic classes.
@@ -224,16 +260,24 @@ def analyze_trend(reports: List[CultureReport]) -> TrendResult:
     multi_drug_resistance = _check_multi_drug_resistance(reports)
     recurrent_organism_30d = _check_recurrent_organism(reports)
 
+    # Check for susceptibility evolution (S→I, S→R, I→R transitions)
+    susc_evolution, evolved_antibiotics = _check_susceptibility_evolution(reports)
+
+    # Combined resistance evolution: either high-risk markers or susceptibility changes
+    combined_resistance_evolution = resistance_evolution or susc_evolution
+
     return TrendResult(
         cfu_trend=cfu_trend,
         cfu_values=cfu_values,
         cfu_deltas=cfu_deltas,
         organism_persistent=organism_persistent,
         organism_list=organism_list,
-        resistance_evolution=resistance_evolution,
+        resistance_evolution=combined_resistance_evolution,
         resistance_timeline=resistance_timeline,
         report_dates=report_dates,
         any_contamination=any_contamination,
         multi_drug_resistance=multi_drug_resistance,
         recurrent_organism_30d=recurrent_organism_30d,
+        susceptibility_evolution=susc_evolution,
+        evolved_antibiotics=evolved_antibiotics,
     )

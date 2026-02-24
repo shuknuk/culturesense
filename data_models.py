@@ -70,6 +70,8 @@ class TrendResult:
         any_contamination: True if any report flagged as contamination
         multi_drug_resistance: True if any report has 2+ resistance markers
         recurrent_organism_30d: True if same organism recurs within 30 days
+        susceptibility_evolution: True if any antibiotic shows S→I, S→R, or I→R transition
+        evolved_antibiotics: List of antibiotics that evolved resistance
     """
 
     cfu_trend: str
@@ -83,6 +85,8 @@ class TrendResult:
     any_contamination: bool
     multi_drug_resistance: bool = False
     recurrent_organism_30d: bool = False
+    susceptibility_evolution: bool = False
+    evolved_antibiotics: List[str] = field(default_factory=list)
 
 
 @dataclass

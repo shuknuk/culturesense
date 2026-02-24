@@ -258,6 +258,45 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
     return [markdown_text.strip()] if markdown_text.strip() else []
 
 
+def _split_manual_reports(text: str) -> List[str]:
+    """
+    Split manual entry text into separate report blocks.
+
+    Handles multiple formats:
+    1. "Report 1", "Report 2" pattern detection
+    2. Double newline separator (\\n\\n)
+    3. Date-based splitting (multiple "Date:" lines indicate separate reports)
+    """
+    import re
+
+    if not text or not text.strip():
+        return []
+
+    text = text.strip()
+
+    # Try splitting on "Report N" pattern first
+    # Match "Report 1", "Report 2", etc. at the start of a line
+    report_pattern = re.compile(r'\n(?=Report\s+\d+)', re.IGNORECASE)
+    blocks = re.split(report_pattern, text)
+    if len(blocks) > 1:
+        return [b.strip() for b in blocks if b.strip()]
+
+    # Try splitting on double newline
+    blocks = text.split("\n\n")
+    if len(blocks) > 1:
+        return [b.strip() for b in blocks if b.strip()]
+
+    # Check for multiple "Date:" lines - indicates multiple reports
+    date_lines = re.findall(r'^Date:\s*\d{4}-\d{2}-\d{2}', text, re.MULTILINE)
+    if len(date_lines) > 1:
+        # Split on "Date:" lines, keeping the Date: prefix
+        parts = re.split(r'(?=^Date:\s*\d{4}-\d{2}-\d{2})', text, flags=re.MULTILINE)
+        return [p.strip() for p in parts if p.strip()]
+
+    # Single block
+    return [text] if text else []
+
+
 def _is_low_confidence(report: CultureReport) -> bool:
     """Return True if any field looks suspiciously generic."""
     return (
@@ -1798,7 +1837,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 )
 
             # ================================================================
-            # TAB B — Manual Entry (unchanged from original)
+            # TAB B — Manual Entry (updated with status indicators)
             # ================================================================
             with gr.Tab("✏ Enter Manually", id="tab_manual"):
                 gr.Markdown("### Paste culture report text directly")
@@ -1807,28 +1846,51 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     "The pipeline will extract structured data, analyse trends, and generate hypotheses."
                 )
 
+                # Status indicator panel for Manual tab
+                with gr.Row(visible=True, elem_classes="status-panel-container") as status_indicator_panel_manual:
+                    pii_status_manual = gr.Markdown(
+                        value='<span class="status-light status-light-white"></span>Ready...',
+                        elem_id="pii_status_manual",
+                    )
+                    medgemma_status_manual = gr.Markdown(
+                        value='<span class="status-light status-light-white"></span>Awaiting analysis...',
+                        elem_id="medgemma_status_manual",
+                    )
+
                 manual_input = gr.Textbox(
                     label="Culture Reports (2–3 sequential)",
-                    placeholder="Paste report text here...",
+                    placeholder="Paste report text here...\n\nExample format:\nReport 1\nDate: 2024-01-15\nOrganism: E. coli\nCFU: 100000\n...\n\nReport 2\nDate: 2024-01-22\nOrganism: E. coli\nCFU: 50000\n...",
                     lines=12,
                 )
                 btn_analyse_manual = gr.Button("🔬 Analyse", variant="primary")
                 manual_output_patient = gr.Markdown()
                 manual_output_clinician = gr.Markdown()
 
-                def on_analyse_manual(text):
+                def on_analyse_manual_start():
+                    """Show analyzing status immediately when button is clicked."""
+                    return (
+                        '<span class="status-light status-light-green"></span>No PII detected (manual entry)',
+                        '<span class="status-light status-light-blue"></span>MedGemma analyzing...',
+                    )
+
+                def on_analyse_manual(text, progress=gr.Progress()):
                     if not text or len(text.strip()) < 20:
                         return (
                             "<p style='color:#c0392b'>Please paste at least one full report.</p>",
                             "",
+                            '<span class="status-light status-light-white"></span>Ready...',
+                            '<span class="status-light status-light-white"></span>Awaiting analysis...',
                         )
 
-                    # Split by double newlines to get separate reports
-                    blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
+                    # Split using the new smart splitter
+                    blocks = _split_manual_reports(text)
+
                     reports = []
                     for block in blocks:
                         try:
-                            r = extract_structured_data(block)
+                            # Scrub PII first (defense in depth)
+                            clean_block = scrub_pii(block)
+                            r = extract_structured_data(clean_block)
                             reports.append(r)
                         except Exception:
                             pass
@@ -1838,10 +1900,12 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             "<p style='color:#c0392b'>Could not extract data from pasted text. "
                             "Check format includes Date, Organism, and CFU/mL.</p>",
                             "",
+                            '<span class="status-light status-light-green"></span>No PII detected (manual entry)',
+                            '<span class="status-light status-light-white"></span>Awaiting analysis...',
                         )
 
                     try:
-                        trend, patient_out, clinician_out = run_pipeline(reports)
+                        trend, patient_out, clinician_out = run_pipeline(reports, progress)
                         patient_html, clinician_html = format_output_html(
                             patient_out, clinician_out, trend
                         )
@@ -1851,12 +1915,22 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         )
                         clinician_html = ""
 
-                    return patient_html, clinician_html
+                    return (
+                        patient_html,
+                        clinician_html,
+                        '<span class="status-light status-light-green"></span>No PII detected (manual entry)',
+                        '<span class="status-light status-light-blue"></span>Analysis complete',
+                    )
 
+                # Chain the events: first show status, then run analysis
                 btn_analyse_manual.click(
+                    fn=on_analyse_manual_start,
+                    inputs=[],
+                    outputs=[pii_status_manual, medgemma_status_manual],
+                ).then(
                     fn=on_analyse_manual,
                     inputs=[manual_input],
-                    outputs=[manual_output_patient, manual_output_clinician],
+                    outputs=[manual_output_patient, manual_output_clinician, pii_status_manual, medgemma_status_manual],
                 )
 
     return demo
