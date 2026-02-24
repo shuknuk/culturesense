@@ -350,9 +350,7 @@ def _parse_hypotheses_table(medgemma_response: str) -> str:
     for h in hypotheses:
         ev = h.get("evidence")
         if ev:
-            # Truncate long evidence strings
-            if len(ev) > 50:
-                ev = ev[:47] + "..."
+            # No truncation - show full evidence text
             evidence_cells.append(ev)
         else:
             evidence_cells.append("—")

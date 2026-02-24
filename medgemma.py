@@ -61,14 +61,21 @@ STRICT RULES:
 
 Hypothesis 1: [name]
   Supporting Evidence:
-    - [point 1]
-    - [point 2]
+    - [Cite specific data from reports: e.g., "Report 1 (2024-01-15): E. coli at 150,000 CFU/mL"]
+    - [Include actual values: e.g., "CFU trajectory: 150,000 → 45,000 → 5,000 (decreasing)"]
   Confidence: [0.0-0.95]
 
 Hypothesis 2: [name]
   Supporting Evidence:
-    - [point 1]
+    - [Cite specific data from reports with dates and values]
   Confidence: [0.0-0.95]
+
+CRITICAL: Every evidence point MUST cite actual values from the structured data:
+- Reference report dates (e.g., "Report 1 (2024-01-15)")
+- Include CFU counts with units (e.g., "150,000 CFU/mL")
+- Note organism names (e.g., "Escherichia coli")
+- Specify antibiotic sensitivities when available (e.g., "Sensitive to Ciprofloxacin")
+- Never use generic phrases like "trend suggests" without citing the specific data points
 """.strip()
 
 # ---------------------------------------------------------------------------

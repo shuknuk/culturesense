@@ -11,13 +11,13 @@ Tab B (manual entry) is the existing flow — zero modifications.
 """
 
 import logging
-import logging
 import time
 import warnings
 from pathlib import Path
 from typing import List, Tuple
 
 import gradio as gr
+import markdown
 
 from data_models import CultureReport, TrendResult
 from extraction import (
@@ -776,9 +776,14 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                 )
 
         if clinician_out.clinician_interpretation:
+            # Convert markdown to HTML for proper rendering (bold, tables, etc.)
+            html_content = markdown.markdown(
+                clinician_out.clinician_interpretation,
+                extensions=['tables', 'fenced_code']
+            )
             c_body += (
                 f"<div style='line-height:1.6;font-size:0.96rem;margin-top:12px;'>"
-                f"{clinician_out.clinician_interpretation}</div>"
+                f"{html_content}</div>"
             )
         if clinician_out.clinician_disclaimer:
             c_body += (
@@ -987,6 +992,18 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
         .resistance-table .marker-s { color: #16A34A; font-weight: 600; }
         .resistance-table .marker-i { color: #D97706; font-weight: 600; }
         .resistance-table .marker-r { color: #DC2626; font-weight: 600; }
+
+        /* Hypotheses table - handle longer evidence text */
+        .output-card table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .output-card table td {
+            white-space: normal;
+            word-wrap: break-word;
+            max-width: 300px;
+            vertical-align: top;
+        }
 
         /* Scrollable textbox for raw extracted text */
         .raw-textbox textarea {
