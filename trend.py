@@ -86,34 +86,54 @@ def _check_susceptibility_evolution(reports: List[CultureReport]) -> tuple:
     """
     Detect S→I, S→R, or I→R transitions for the same antibiotic.
 
+    Only flags evolution if the FINAL report shows worsened susceptibility
+    compared to baseline. Transient changes that later resolved do NOT count
+    as evolution - we care about the current state.
+
     Returns:
         (has_evolution, evolved_antibiotics)
-        - has_evolution: True if any worsening transition detected
-        - evolved_antibiotics: List of antibiotics that evolved resistance
+        - has_evolution: True if final report shows worsened susceptibility vs baseline
+        - evolved_antibiotics: List of antibiotics with ongoing worsened susceptibility
     """
     if len(reports) < 2:
         return False, []
+
+    def normalize_interp(interp: str) -> str:
+        """Normalize interpretation to single letter: S, I, or R."""
+        upper = interp.strip().upper()
+        if upper in ("S", "SENSITIVE", "SUSCEPTIBLE"):
+            return "S"
+        elif upper in ("I", "INTERMEDIATE"):
+            return "I"
+        elif upper in ("R", "RESISTANT"):
+            return "R"
+        return upper
 
     # Build baseline from first report
     baseline: dict = {}  # antibiotic -> interpretation
     for susc in reports[0].susceptibility_profile:
         abx = susc.antibiotic.strip().lower()
-        baseline[abx] = susc.interpretation.upper()
+        baseline[abx] = normalize_interp(susc.interpretation)
 
-    # Check subsequent reports for evolution
+    # Build final state from LAST report
+    final_state: dict = {}  # antibiotic -> interpretation
+    for susc in reports[-1].susceptibility_profile:
+        abx = susc.antibiotic.strip().lower()
+        final_state[abx] = normalize_interp(susc.interpretation)
+
+    # Check if final state shows worsening vs baseline
     evolved = []
-    for r in reports[1:]:
-        for susc in r.susceptibility_profile:
-            abx = susc.antibiotic.strip().lower()
-            current = susc.interpretation.upper()
-
-            if abx in baseline:
-                prev = baseline[abx]
-                # Detect worsening: S→I, S→R, I→R
-                if (prev == "S" and current in ("I", "R")) or \
-                   (prev == "I" and current == "R"):
-                    if abx not in [a.lower() for a in evolved]:
-                        evolved.append(susc.antibiotic.strip())  # Preserve original case
+    for abx, final_interp in final_state.items():
+        if abx in baseline:
+            baseline_interp = baseline[abx]
+            # Detect worsening: S→I, S→R, I→R (compare final vs baseline)
+            if (baseline_interp == "S" and final_interp in ("I", "R")) or \
+               (baseline_interp == "I" and final_interp == "R"):
+                # Find original case from reports for display
+                for susc in reports[-1].susceptibility_profile:
+                    if susc.antibiotic.strip().lower() == abx:
+                        evolved.append(susc.antibiotic.strip())
+                        break
 
     return len(evolved) > 0, evolved
 

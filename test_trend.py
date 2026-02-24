@@ -209,6 +209,160 @@ _assert(
 )
 
 # ---------------------------------------------------------------------------
+# 13. Susceptibility evolution: S→I→S (transient, resolved) - should NOT flag
+# ---------------------------------------------------------------------------
+print("\n=== Test: Susceptibility Evolution (S→I→S, Resolved) ===")
+from data_models import AntibioticSusceptibility
+
+rpts13 = [
+    CultureReport(
+        date="2026-02-01",
+        organism="Escherichia coli",
+        cfu=150000,
+        resistance_markers=[],
+        susceptibility_profile=[
+            AntibioticSusceptibility("Ciprofloxacin", "<= 0.25", "Sensitive"),
+        ],
+        specimen_type="urine",
+        contamination_flag=False,
+        raw_text="<stub>",
+    ),
+    CultureReport(
+        date="2026-02-08",
+        organism="Escherichia coli",
+        cfu=45000,
+        resistance_markers=[],
+        susceptibility_profile=[
+            AntibioticSusceptibility("Ciprofloxacin", "1.0", "Intermediate"),  # S→I
+        ],
+        specimen_type="urine",
+        contamination_flag=False,
+        raw_text="<stub>",
+    ),
+    CultureReport(
+        date="2026-02-15",
+        organism="Escherichia coli",
+        cfu=3000,
+        resistance_markers=[],
+        susceptibility_profile=[
+            AntibioticSusceptibility("Ciprofloxacin", "<= 0.25", "Sensitive"),  # Back to S
+        ],
+        specimen_type="urine",
+        contamination_flag=False,
+        raw_text="<stub>",
+    ),
+]
+t13 = analyze_trend(rpts13)
+_assert(
+    t13.susceptibility_evolution is False,
+    f"susceptibility_evolution == False for S→I→S (resolved)  (got {t13.susceptibility_evolution})",
+)
+_assert(
+    t13.resistance_evolution is False,
+    f"resistance_evolution == False for S→I→S (resolved)  (got {t13.resistance_evolution})",
+)
+_assert(
+    t13.evolved_antibiotics == [],
+    f"evolved_antibiotics == [] for resolved case  (got {t13.evolved_antibiotics})",
+)
+
+# ---------------------------------------------------------------------------
+# 14. Susceptibility evolution: S→I (ongoing worsening) - SHOULD flag
+# ---------------------------------------------------------------------------
+print("\n=== Test: Susceptibility Evolution (S→I, Ongoing) ===")
+rpts14 = [
+    CultureReport(
+        date="2026-02-01",
+        organism="Escherichia coli",
+        cfu=100000,
+        resistance_markers=[],
+        susceptibility_profile=[
+            AntibioticSusceptibility("Ciprofloxacin", "<= 0.25", "Sensitive"),
+        ],
+        specimen_type="urine",
+        contamination_flag=False,
+        raw_text="<stub>",
+    ),
+    CultureReport(
+        date="2026-02-08",
+        organism="Escherichia coli",
+        cfu=120000,
+        resistance_markers=[],
+        susceptibility_profile=[
+            AntibioticSusceptibility("Ciprofloxacin", "1.0", "Intermediate"),  # S→I
+        ],
+        specimen_type="urine",
+        contamination_flag=False,
+        raw_text="<stub>",
+    ),
+]
+t14 = analyze_trend(rpts14)
+_assert(
+    t14.susceptibility_evolution is True,
+    f"susceptibility_evolution == True for S→I (ongoing)  (got {t14.susceptibility_evolution})",
+)
+_assert(
+    t14.resistance_evolution is True,
+    f"resistance_evolution == True for S→I (ongoing)  (got {t14.resistance_evolution})",
+)
+_assert(
+    "Ciprofloxacin" in t14.evolved_antibiotics,
+    f"Ciprofloxacin in evolved_antibiotics  (got {t14.evolved_antibiotics})",
+)
+
+# ---------------------------------------------------------------------------
+# 15. Susceptibility evolution: S→I→R (progressive worsening) - SHOULD flag
+# ---------------------------------------------------------------------------
+print("\n=== Test: Susceptibility Evolution (S→I→R, Progressive) ===")
+rpts15 = [
+    CultureReport(
+        date="2026-02-01",
+        organism="Escherichia coli",
+        cfu=100000,
+        resistance_markers=[],
+        susceptibility_profile=[
+            AntibioticSusceptibility("Ciprofloxacin", "<= 0.25", "Sensitive"),
+        ],
+        specimen_type="urine",
+        contamination_flag=False,
+        raw_text="<stub>",
+    ),
+    CultureReport(
+        date="2026-02-08",
+        organism="Escherichia coli",
+        cfu=80000,
+        resistance_markers=[],
+        susceptibility_profile=[
+            AntibioticSusceptibility("Ciprofloxacin", "1.0", "Intermediate"),
+        ],
+        specimen_type="urine",
+        contamination_flag=False,
+        raw_text="<stub>",
+    ),
+    CultureReport(
+        date="2026-02-15",
+        organism="Escherichia coli",
+        cfu=60000,
+        resistance_markers=[],
+        susceptibility_profile=[
+            AntibioticSusceptibility("Ciprofloxacin", ">= 4.0", "Resistant"),  # S→I→R
+        ],
+        specimen_type="urine",
+        contamination_flag=False,
+        raw_text="<stub>",
+    ),
+]
+t15 = analyze_trend(rpts15)
+_assert(
+    t15.susceptibility_evolution is True,
+    f"susceptibility_evolution == True for S→I→R  (got {t15.susceptibility_evolution})",
+)
+_assert(
+    "Ciprofloxacin" in t15.evolved_antibiotics,
+    f"Ciprofloxacin in evolved_antibiotics  (got {t15.evolved_antibiotics})",
+)
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 print(f"\n{'=' * 50}")

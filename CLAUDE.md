@@ -418,6 +418,54 @@ if not trend.organism_persistent and trend.cfu_trend != "cleared":
     parts.append("Organism change may indicate reinfection.")
 ```
 
+### BUG E — Stewardship Alert firing on resolved susceptibility evolution (FIXED)
+
+**Status:** ✅ FIXED — modified `_check_susceptibility_evolution()` in `trend.py`
+
+**Symptom:** Stewardship Alert shows "⚠ Emerging resistance detected" when uploading
+3 sequential reports where Report 2 shows S→I transition but Report 3 shows I→S
+resolution. The alert fires because intermediate worsening was detected, even though
+the final state shows no resistance.
+
+**Root cause:** `_check_susceptibility_evolution()` flagged ANY worsening across all
+reports (comparing each report to baseline), not just the final state. This meant
+transient changes that later resolved would permanently flag evolution.
+
+**Fix applied in `trend.py`:**
+
+```python
+def _check_susceptibility_evolution(reports: List[CultureReport]) -> tuple:
+    """
+    Only flags evolution if the FINAL report shows worsened susceptibility
+    compared to baseline. Transient changes that later resolved do NOT count.
+    """
+    # Build baseline from first report
+    baseline: dict = {}  # antibiotic -> interpretation
+    for susc in reports[0].susceptibility_profile:
+        abx = susc.antibiotic.strip().lower()
+        baseline[abx] = normalize_interp(susc.interpretation)
+
+    # Build final state from LAST report (not intermediate)
+    final_state: dict = {}
+    for susc in reports[-1].susceptibility_profile:
+        abx = susc.antibiotic.strip().lower()
+        final_state[abx] = normalize_interp(susc.interpretation)
+
+    # Check if final state shows worsening vs baseline
+    for abx, final_interp in final_state.items():
+        if abx in baseline:
+            baseline_interp = baseline[abx]
+            # Only flag if FINAL is worse than BASELINE
+            if (baseline_interp == "S" and final_interp in ("I", "R")) or \
+               (baseline_interp == "I" and final_interp == "R"):
+                evolved.append(...)
+```
+
+**Key behavior change:**
+- Before: S→I→S (Report 1: S, Report 2: I, Report 3: S) would flag evolution
+- After: S→I→S does NOT flag evolution (final state matches baseline)
+- Still flags: S→I, S→R, S→I→R, I→R (any final-state worsening)
+
 ---
 
 ## PII/PHI Removal — Pattern Reference
