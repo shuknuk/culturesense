@@ -265,7 +265,12 @@ def _is_low_confidence(report: CultureReport) -> bool:
         report.organism == "unknown"
         or report.date == "unknown"
         or report.specimen_type not in ("urine", "stool")
-        or (report.cfu == 0 and "no growth" not in report.raw_text.lower())
+        or (
+            report.cfu == 0
+            and "no growth" not in report.raw_text.lower()
+            and report.organism.lower() not in ("no growth",)
+            and report.specimen_type != "stool"  # cfu=0 is normal for stool
+        )
     )
 
 
@@ -472,13 +477,40 @@ def process_uploaded_pdfs(
             )
             debug_log += f"\n✗ No valid culture records found in {filename}\n\n"
         else:
+            # Within-file dedup: if the same PDF was split into multiple blocks that
+            # share the same date, prefer the block with a known organism over "unknown".
+            # This prevents addendum/section fragments from creating phantom records.
+            best_by_date: dict = {}
+            best_blocks_by_date: dict = {}
+            for r, b in zip(file_reports, [r.raw_text for r in file_reports]):
+                existing = best_by_date.get(r.date)
+                if existing is None:
+                    best_by_date[r.date] = r
+                    best_blocks_by_date[r.date] = b
+                elif existing.organism == "unknown" and r.organism != "unknown":
+                    # Upgrade: replace the unknown block with the informative one
+                    debug_log += f"    ✓ Promoted block with organism={r.organism} over unknown for date={r.date}\n"
+                    best_by_date[r.date] = r
+                    best_blocks_by_date[r.date] = b
+                elif r.organism == "unknown":
+                    # Phantom fragment: skip in favour of existing
+                    debug_log += f"    ⚠ Phantom block (unknown organism, date={r.date}) suppressed\n"
+                else:
+                    # Different organisms on the same date within one PDF — keep both
+                    key = f"{r.date}_{r.organism}"
+                    if key not in best_by_date:
+                        best_by_date[key] = r
+                        best_blocks_by_date[key] = b
+            file_reports = list(best_by_date.values())
+            file_raw_blocks = list(best_blocks_by_date.values())
+
             count = len(file_reports)
             per_file_statuses.append(
                 f'<div style="margin:4px 0"><b>{filename}</b> — '
                 f'<span style="color:#27ae60">✓ {count} record{"s" if count != 1 else ""} found</span></div>'
             )
             all_reports.extend(file_reports)
-            all_raw_blocks.extend(r.raw_text for r in file_reports)
+            all_raw_blocks.extend(file_raw_blocks)
             debug_log += f"\n✓ Extracted {count} record(s) from {filename}\n\n"
 
     if not all_reports:
@@ -491,19 +523,47 @@ def process_uploaded_pdfs(
     all_reports = [p[0] for p in combined]
     all_raw_blocks = [p[1] for p in combined]
 
-    # Deduplicate: same (date, organism, cfu) → keep first
+    # TWO-PASS DEDUPLICATION
+    # Pass 1: Identify dates that have at least one successful extraction
+    dates_with_success: set = set()
+    for report in all_reports:
+        if report.organism != "unknown" or report.cfu != 0:
+            dates_with_success.add(report.date)
+
+    debug_log += f"Dates with successful extractions: {sorted(dates_with_success)}\n"
+
+    # Pass 2: Deduplicate, skipping failed extractions for dates with success
     seen: set = set()
     deduped_reports: List[CultureReport] = []
     deduped_blocks: List[str] = []
+
     for report, block in zip(all_reports, all_raw_blocks):
-        key = (report.date, report.organism, report.cfu)
-        if key in seen:
-            debug_log += f"⚠ Duplicate record skipped: {key}\n"
-            warnings.warn(f"Duplicate record skipped: {key}", UserWarning, stacklevel=2)
-        else:
+        is_failed_extraction = report.organism == "unknown" and report.cfu == 0
+
+        if is_failed_extraction:
+            # Skip failed extraction if ANY report for this date has successful extraction
+            if report.date in dates_with_success:
+                debug_log += f"  ⚠ Failed extraction skipped (successful extraction exists for {report.date})\n"
+                continue
+            # Also skip if we already have a failed extraction for this date
+            key = (report.date, "failed")
+            if key in seen:
+                debug_log += f"  ⚠ Duplicate failed extraction skipped: date={report.date}\n"
+                continue
             seen.add(key)
             deduped_reports.append(report)
             deduped_blocks.append(block)
+            debug_log += f"  ⚠ Kept failed extraction (date={report.date})\n"
+        else:
+            # Successful extraction
+            key = (report.date, report.organism, report.cfu)
+            if key in seen:
+                debug_log += f"  ⚠ Duplicate record skipped: {key}\n"
+                warnings.warn(f"Duplicate record skipped: {key}", UserWarning, stacklevel=2)
+            else:
+                seen.add(key)
+                deduped_reports.append(report)
+                deduped_blocks.append(block)
 
     # Truncate to MAX_RECORDS most recent
     truncation_warning = ""

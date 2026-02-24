@@ -637,6 +637,121 @@ def debug_extraction(report_text: str, label: str = "Report") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Stool-specific extraction helpers
+# ---------------------------------------------------------------------------
+
+_RE_STOOL_POSITIVE = re.compile(
+    r"\b(positive|detected|isolated|found)\b", re.IGNORECASE
+)
+_RE_STOOL_NEGATIVE = re.compile(
+    r"\b(negative|not\s+detected|no\s+(?:growth|pathogens|isolates))\b",
+    re.IGNORECASE,
+)
+_RE_STOOL_RESULT_EXPLICIT = re.compile(
+    r"(?:Result|Finding|Culture\s+Result)[\s:]+"
+    r"(Positive|Negative|No\s+Growth|Growth\s+Detected|No\s+Pathogens|Pathogens\s+Found)",
+    re.IGNORECASE,
+)
+_STOOL_CULTURE_KEYWORDS = [
+    "culture", "specimen", "organism", "pathogen", "bacteria",
+    "isolated", "salmonella", "e. coli", "escherichia", "shigella",
+    "campylobacter", "listeria", "clostridium", "stool", "fecal", "gi",
+]
+
+
+def _parse_stool_result(report_text: str) -> tuple:
+    """
+    Extract stool-specific fields from a GI culture report.
+
+    Returns:
+        (result, pathogens_detected, notes) where result is "Positive",
+        "Negative", or "unknown".
+    """
+    text = report_text.strip()
+    result = "unknown"
+    notes = ""
+
+    # Try explicit result pattern first (most reliable)
+    m = _RE_STOOL_RESULT_EXPLICIT.search(text)
+    if m:
+        result = m.group(1).strip()
+    elif _RE_STOOL_POSITIVE.search(text):
+        result = "Positive"
+    elif _RE_STOOL_NEGATIVE.search(text):
+        result = "Negative"
+
+    # Extract pathogens using the existing organism parser
+    organism = _parse_organism(text)
+    if organism is None:
+        # Fallback: scan for known stool pathogens mentioned anywhere in the text
+        # (stool reports often say "Salmonella detected" without a labelled prefix)
+        _STOOL_PATHOGEN_NAMES = re.compile(
+            r"\b(Salmonella|Shigella|Campylobacter|Clostridi(?:um|oides)\s+\w+|"
+            r"E(?:scherichia)?\.\s*coli|Listeria|Yersinia|Vibrio|Cryptosporidium|Giardia)\b",
+            re.IGNORECASE,
+        )
+        m_path = _STOOL_PATHOGEN_NAMES.search(text)
+        if m_path:
+            organism = m_path.group(1).strip()
+    pathogens = (
+        [organism]
+        if organism and organism not in ("unknown", "mixed flora", "normal flora")
+        else []
+    )
+
+    # Collect any trailing comment lines as notes
+    for line in text.splitlines():
+        if re.match(r"^\s*(?:Note|Comment|Remark)s?\s*:", line, re.IGNORECASE):
+            notes = line.strip()
+            break
+
+    return result, pathogens, notes
+
+
+def _extract_stool_report(processed_text: str, specimen_type: str) -> "CultureReport":
+    """
+    Extract a stool culture report, populating stool-specific fields and
+    always setting cfu=0 (not applicable for stool).
+
+    Raises ExtractionError if no culture content is recognisable.
+    """
+    result, pathogens, _notes = _parse_stool_result(processed_text)
+
+    # Use pathogen name if found; use "No growth" for confirmed negatives so
+    # downstream logic can distinguish from truly unknown extractions.
+    if pathogens:
+        organism = pathogens[0]
+    elif result == "Negative":
+        organism = "No growth"
+    else:
+        organism = "unknown"
+
+    if organism == "unknown" and result == "unknown":
+        text_lower = processed_text.lower()
+        has_culture_content = any(kw in text_lower for kw in _STOOL_CULTURE_KEYWORDS)
+        if not has_culture_content:
+            raise ExtractionError(
+                "Extraction failed: could not parse stool culture data from report. "
+                "No organism, result, or culture indicators found."
+            )
+
+    date = _parse_date(processed_text)
+    resistance_markers = _parse_resistance_markers(processed_text)
+    contamination_flag = _is_contamination(organism)
+
+    return CultureReport(
+        date=date,
+        organism=organism,
+        cfu=0,  # Not applicable for stool
+        resistance_markers=resistance_markers,
+        susceptibility_profile=[],
+        specimen_type=specimen_type,
+        contamination_flag=contamination_flag,
+        raw_text=processed_text,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public extraction function
 # ---------------------------------------------------------------------------
 
@@ -659,6 +774,14 @@ def extract_structured_data(report_text: str) -> CultureReport:
     """
     # Pre-process with Docling (handles file paths or raw text)
     processed_text = _process_with_docling(report_text)
+
+    # Route stool specimens to the stool-specific extractor before CFU/organism checks.
+    # Stool reports never have CFU values, so the generic ExtractionError guard below
+    # would incorrectly drop valid negative stool cultures.  Detect specimen type first
+    # and delegate so that cfu is always set to 0 and stool-specific fields are populated.
+    early_specimen = _parse_specimen(processed_text)
+    if early_specimen == "stool":
+        return _extract_stool_report(processed_text, early_specimen)
 
     # Attempt extraction on processed text
     organism = _parse_organism(processed_text)
