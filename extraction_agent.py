@@ -991,10 +991,18 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
 
         /* Scrollable textbox for raw extracted text */
         .raw-textbox textarea {
+            min-height: 200px;
             max-height: 300px;
             overflow-y: auto !important;
             white-space: pre-wrap;
             word-wrap: break-word;
+        }
+
+        /* Fullscreen button styling */
+        .fullscreen-btn {
+            min-width: 40px !important;
+            padding: 6px 8px !important;
+            font-size: 1.1rem !important;
         }
 
         /* PDF count header */
@@ -1323,29 +1331,95 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         "📋 Raw Extracted Text (for clinician verification)",
                         open=False,
                     ):
-                        raw_box_0 = gr.Textbox(
-                            label="Record 1",
+                        # Record 1 with fullscreen button
+                        with gr.Row():
+                            raw_box_0 = gr.Textbox(
+                                label="Record 1",
+                                interactive=False,
+                                visible=False,
+                                container=True,
+                                show_label=True,
+                                elem_classes="raw-textbox",
+                                scale=5,
+                            )
+                            btn_fullscreen_0 = gr.Button(
+                                "⛶",
+                                visible=False,
+                                elem_classes="fullscreen-btn",
+                                min_width=40,
+                            )
+
+                        # Record 2 with fullscreen button
+                        with gr.Row():
+                            raw_box_1 = gr.Textbox(
+                                label="Record 2",
+                                interactive=False,
+                                visible=False,
+                                container=True,
+                                show_label=True,
+                                elem_classes="raw-textbox",
+                                scale=5,
+                            )
+                            btn_fullscreen_1 = gr.Button(
+                                "⛶",
+                                visible=False,
+                                elem_classes="fullscreen-btn",
+                                min_width=40,
+                            )
+
+                        # Record 3 with fullscreen button
+                        with gr.Row():
+                            raw_box_2 = gr.Textbox(
+                                label="Record 3",
+                                interactive=False,
+                                visible=False,
+                                container=True,
+                                show_label=True,
+                                elem_classes="raw-textbox",
+                                scale=5,
+                            )
+                            btn_fullscreen_2 = gr.Button(
+                                "⛶",
+                                visible=False,
+                                elem_classes="fullscreen-btn",
+                                min_width=40,
+                            )
+
+                    # Fullscreen modals for each record
+                    with gr.Modal(visible=False) as modal_0:
+                        modal_text_0 = gr.Textbox(
+                            label="Record 1 - Full View",
                             interactive=False,
-                            visible=False,
-                            container=True,
                             show_label=True,
-                            elem_classes="raw-textbox",
+                            lines=25,
+                            max_lines=50,
                         )
-                        raw_box_1 = gr.Textbox(
-                            label="Record 2",
-                            interactive=False,
-                            visible=False,
-                            container=True,
-                            show_label=True,
-                            elem_classes="raw-textbox",
+                        gr.Button("Close").click(
+                            lambda: gr.update(visible=False), None, modal_0
                         )
-                        raw_box_2 = gr.Textbox(
-                            label="Record 3",
+
+                    with gr.Modal(visible=False) as modal_1:
+                        modal_text_1 = gr.Textbox(
+                            label="Record 2 - Full View",
                             interactive=False,
-                            visible=False,
-                            container=True,
                             show_label=True,
-                            elem_classes="raw-textbox",
+                            lines=25,
+                            max_lines=50,
+                        )
+                        gr.Button("Close").click(
+                            lambda: gr.update(visible=False), None, modal_1
+                        )
+
+                    with gr.Modal(visible=False) as modal_2:
+                        modal_text_2 = gr.Textbox(
+                            label="Record 3 - Full View",
+                            interactive=False,
+                            show_label=True,
+                            lines=25,
+                            max_lines=50,
+                        )
+                        gr.Button("Close").click(
+                            lambda: gr.update(visible=False), None, modal_2
                         )
 
                     with gr.Row():
@@ -1410,6 +1484,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             gr.update(value="", visible=False),  # raw_box_0
                             gr.update(value="", visible=False),  # raw_box_1
                             gr.update(value="", visible=False),  # raw_box_2
+                            gr.update(visible=False),  # btn_fullscreen_0
+                            gr.update(visible=False),  # btn_fullscreen_1
+                            gr.update(visible=False),  # btn_fullscreen_2
                             "",  # debug_output
                             gr.update(visible=True),  # btn_process
                             gr.update(visible=False),  # btn_process_loading
@@ -1453,6 +1530,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             gr.update(value="", visible=False),
                             gr.update(value="", visible=False),
                             gr.update(value="", visible=False),
+                            gr.update(visible=False),  # btn_fullscreen_0
+                            gr.update(visible=False),  # btn_fullscreen_1
+                            gr.update(visible=False),  # btn_fullscreen_2
                             debug_log,  # Show debug log
                             gr.update(visible=True),  # btn_process
                             gr.update(visible=False),  # btn_process_loading
@@ -1467,6 +1547,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
 
                     # Build raw text box updates (pre-created 3 boxes)
                     raw_updates = []
+                    fullscreen_updates = []
                     for i in range(MAX_RECORDS):
                         if i < len(raw_blocks):
                             raw_updates.append(
@@ -1476,8 +1557,10 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                                     visible=True,
                                 )
                             )
+                            fullscreen_updates.append(gr.update(visible=True))
                         else:
                             raw_updates.append(gr.update(value="", visible=False))
+                            fullscreen_updates.append(gr.update(visible=False))
 
                     return (
                         reports,
@@ -1492,6 +1575,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         raw_updates[0],
                         raw_updates[1],
                         raw_updates[2],
+                        fullscreen_updates[0],  # btn_fullscreen_0
+                        fullscreen_updates[1],  # btn_fullscreen_1
+                        fullscreen_updates[2],  # btn_fullscreen_2
                         debug_log,  # Store debug log
                         gr.update(visible=True),  # btn_process
                         gr.update(visible=False),  # btn_process_loading
@@ -1529,6 +1615,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         raw_box_0,
                         raw_box_1,
                         raw_box_2,
+                        btn_fullscreen_0,
+                        btn_fullscreen_1,
+                        btn_fullscreen_2,
                         debug_output,
                         btn_process,
                         btn_process_loading,
@@ -1838,5 +1927,26 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                     inputs=[manual_input],
                     outputs=[manual_output_patient, manual_output_clinician],
                 )
+
+            # ── Fullscreen button handlers (outside the tabs block) ──────────
+            def open_fullscreen(text):
+                """Open fullscreen modal with text content."""
+                return gr.update(visible=True), gr.update(value=text)
+
+            btn_fullscreen_0.click(
+                fn=open_fullscreen,
+                inputs=[raw_box_0],
+                outputs=[modal_0, modal_text_0],
+            )
+            btn_fullscreen_1.click(
+                fn=open_fullscreen,
+                inputs=[raw_box_1],
+                outputs=[modal_1, modal_text_1],
+            )
+            btn_fullscreen_2.click(
+                fn=open_fullscreen,
+                inputs=[raw_box_2],
+                outputs=[modal_2, modal_text_2],
+            )
 
     return demo
