@@ -129,6 +129,12 @@ _RE_ANTIBIOTIC_LINE = re.compile(
     re.IGNORECASE | re.MULTILINE
 )
 
+# Simple susceptibility format for manual entry: "Antibiotic: S" or "Antibiotic: Sensitive"
+_RE_SIMPLE_SUSCEPTIBILITY = re.compile(
+    r'^([A-Za-z][A-Za-z\s\-]+?)\s*:\s*(S|I|R|Sensitive|Intermediate|Resistant)\s*$',
+    re.IGNORECASE | re.MULTILINE
+)
+
 # Negation words to check around resistance markers (for context-aware extraction)
 _NEGATION_WORDS = ["no ", "not ", "none", "without", "negative for", "undetected", "ruled out"]
 
@@ -504,6 +510,39 @@ def _parse_susceptibility_profile(report_text: str) -> list[AntibioticSusceptibi
         profile.append(AntibioticSusceptibility(
             antibiotic=antibiotic,
             mic=mic,
+            interpretation=interpretation,
+            breakpoints="",
+            notes=""
+        ))
+
+    # Pattern 4: Simple "Antibiotic: S" format (common in manual entry)
+    for match in _RE_SIMPLE_SUSCEPTIBILITY.finditer(report_text):
+        antibiotic = match.group(1).strip()
+        interp_raw = match.group(2).strip().upper()
+
+        # Normalize interpretation to S/I/R
+        if interp_raw in ("S", "SENSITIVE"):
+            interpretation = "S"
+        elif interp_raw in ("I", "INTERMEDIATE"):
+            interpretation = "I"
+        elif interp_raw in ("R", "RESISTANT"):
+            interpretation = "R"
+        else:
+            continue  # Skip if not a valid interpretation
+
+        # Skip if not a valid antibiotic name (too short or looks like a header)
+        if len(antibiotic) < 3 or antibiotic.lower() in ("antibiotic", "agent", "drug", "name"):
+            continue
+
+        # Deduplicate
+        antibiotic_lower = antibiotic.lower()
+        if antibiotic_lower in seen_antibiotics:
+            continue
+        seen_antibiotics.add(antibiotic_lower)
+
+        profile.append(AntibioticSusceptibility(
+            antibiotic=antibiotic,
+            mic="",  # No MIC in simple format
             interpretation=interpretation,
             breakpoints="",
             notes=""
