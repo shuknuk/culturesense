@@ -149,8 +149,10 @@ Never violate these regardless of what the task asks.
 
 1. **MedGemma is the ONLY LLM.** No OpenAI, Anthropic, Gemini, or any other API calls.
 
-2. **Raw text NEVER reaches MedGemma.** `call_medgemma()` receives only structured JSON
-   built from typed dataclasses. `raw_text` on CultureReport is always `""` at call time.
+2. **call_medgemma() for REASONING receives structured JSON plus optional clean_document_text
+   (PII-scrubbed).** raw_text on CultureReport is always "" — this is the safety boundary.
+   clean_document_text is the scrubbed version and is safe to send. Text with PII intact
+   NEVER reaches MedGemma under any circumstances.
 
 3. **PII is removed before any processing.** Patient name, DOB, MRN are stripped by
    `pii_removal.py` before the text reaches `extract_structured_data()`.

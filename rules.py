@@ -154,6 +154,16 @@ ORGANISM_ALIASES: dict = {
     # Proteus
     "proteus": "proteus mirabilis",
     "proteus mirabilis": "proteus mirabilis",
+    # Stool pathogens
+    "salmonella": "salmonella",
+    "shigella": "shigella",
+    "campylobacter": "campylobacter",
+    "c. diff": "clostridioides difficile",
+    "c.diff": "clostridioides difficile",
+    "clostridioides difficile": "clostridioides difficile",
+    "clostridium difficile": "clostridioides difficile",
+    "giardia": "giardia lamblia",
+    "cryptosporidium": "cryptosporidium",
     # Contamination terms (kept as-is but included for normalisation completeness)
     "mixed flora": "mixed flora",
     "skin flora": "mixed flora",

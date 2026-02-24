@@ -81,6 +81,11 @@ _RE_ORGANISM_ALT4 = re.compile(
     r"Culture\s+results?:\s*([^.].*?)(?:\n|$)", re.IGNORECASE
 )
 _RE_ORGANISM_ALT5 = re.compile(r"ORGANISM:\s*([^.].*?)(?:\n|$)", re.IGNORECASE)
+# Additional organism patterns for more lab report formats
+_RE_ORGANISM_ALT6 = re.compile(r"Bacteria:\s*([^.].*?)(?:\n|$)", re.IGNORECASE)
+_RE_ORGANISM_ALT7 = re.compile(r"Pathogen:\s*([^.].*?)(?:\n|$)", re.IGNORECASE)
+_RE_ORGANISM_ALT8 = re.compile(r"Organism\s+Name:\s*([^.].*?)(?:\n|$)", re.IGNORECASE)
+_RE_ORGANISM_TABLE = re.compile(r"\|\s*Organism\s*\|\s*([A-Za-z][^|\n]+)", re.IGNORECASE)
 
 # CFU/mL: Multiple patterns for various formats
 _RE_CFU_PRIMARY = re.compile(r"CFU[/\\]?m?L?:\s*([><]?\s*[\d,]+)", re.IGNORECASE)
@@ -91,7 +96,12 @@ _RE_CFU_ALT1 = re.compile(
 # like "<5,000 CFU/mL" or "&lt;5,000 CFU/mL" (HTML-escaped) or partial numbers like ",000"
 _RE_CFU_ALT2 = re.compile(r"(?<![<\d,;])(\d[\d,]*)\s*(?:CFU|colonies|cells)", re.IGNORECASE)
 _RE_CFU_ALT3 = re.compile(r">\s*?([\d,]+)", re.IGNORECASE)  # >100,000
-_RE_CFU_ALT4 = re.compile(r"(\d{1,3},\d{3})", re.IGNORECASE)  # 5,000 or 100,000 pattern
+# Match comma-formatted numbers only when CFU context words are nearby
+# Context words: count, colony, CFU, growth, bacteria, organisms
+_RE_CFU_ALT4 = re.compile(
+    r"(?:count|colony|CFU|growth|bacteria|organisms)[^\d]{0,80}?(\d{1,3},\d{3})",
+    re.IGNORECASE
+)
 
 # Fallback CFU patterns
 _RE_CFU_SCIENTIFIC = re.compile(r"10\^(\d+)", re.IGNORECASE)  # 10^5 → 100000
@@ -99,7 +109,36 @@ _RE_CFU_WORD = re.compile(r"(TNTC|Too\s+Numerous\s+To\s+Count)", re.IGNORECASE)
 _RE_CFU_NO_GROWTH = re.compile(
     r"(No\s+growth|No\s+significant\s+growth|0\s+CFU|Negative)", re.IGNORECASE
 )
-_RE_CFU_RAW_NUMBER = re.compile(r"\b([\d]{5,})\b")  # bare large number (5+ digits)
+# Match bare 5+ digit numbers only when CFU context words are nearby
+_RE_CFU_RAW_NUMBER = re.compile(
+    r"(?:count|colony|CFU|growth|bacteria|organisms)[^\d]{0,80}?(\d{5,})",
+    re.IGNORECASE
+)
+
+# Additional CFU patterns for more lab report formats
+# Pattern for "Colony Count: X" or "Colony Count X"
+_RE_CFU_COLONY = re.compile(
+    r"Colony\s+Count[:\s]+([><]?\s*[\d,]+)",
+    re.IGNORECASE
+)
+
+# Pattern for table format: | Colony Count | >100,000 |
+_RE_CFU_TABLE = re.compile(
+    r"\|\s*Colony\s+Count\s*\|\s*([><]?\s*[\d,]+)",
+    re.IGNORECASE
+)
+
+# Pattern for "Result: X CFU" or "Result: X/mL"
+_RE_CFU_RESULT = re.compile(
+    r"Result[:\s]+([><]?\s*[\d,]+)\s*(?:CFU)?(?:/mL)?",
+    re.IGNORECASE
+)
+
+# Pattern for "Bacterial Count: X"
+_RE_CFU_BACTERIAL = re.compile(
+    r"Bacterial\s+Count[:\s]+([><]?\s*[\d,]+)",
+    re.IGNORECASE
+)
 
 # Date: Multiple patterns for various formats
 _RE_DATE_PRIMARY = re.compile(
@@ -161,6 +200,80 @@ _RE_SPECIMEN_STOOL_KEYWORD = re.compile(
     r"\b(stool|fecal|faecal|feces|gi)\b", re.IGNORECASE
 )
 
+# Specimen type keywords for early detection
+_URINE_KEYWORDS = [
+    "urine", "urinalysis", "clean-catch", "midstream", "catheter",
+    "bladder", "uti", "cfu/ml", "colony count", "bacteriuria"
+]
+
+_STOOL_KEYWORDS = [
+    "stool", "fecal", "feces", "gi", "gastrointestinal", "bowel",
+    "rectal", "ova", "parasite", "c. diff", "clostridioides",
+    "enteric", "diarrhea", "pathogen panel"
+]
+
+
+def detect_specimen_type(text: str) -> str:
+    """
+    Detect specimen type from raw Docling markdown BEFORE any other extraction.
+
+    This is the FIRST step in the extraction pipeline.
+
+    Returns:
+        "urine" if urine-specific keywords found
+        "stool" if stool-specific keywords found
+        "unknown" if neither matches
+    """
+    text_lower = text.lower()
+
+    # Count keyword matches for each type
+    urine_score = sum(1 for kw in _URINE_KEYWORDS if kw in text_lower)
+    stool_score = sum(1 for kw in _STOOL_KEYWORDS if kw in text_lower)
+
+    # Require at least 2 matches to avoid false positives from single words
+    if stool_score >= 2:
+        return "stool"
+    elif urine_score >= 2:
+        return "urine"
+    elif stool_score > urine_score:
+        return "stool"
+    elif urine_score > stool_score:
+        return "urine"
+
+    return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# CFU Context Validation
+# ---------------------------------------------------------------------------
+
+# Words that indicate a number is NOT a CFU value (requisition, accession, etc.)
+_NEGATIVE_CONTEXT_WORDS = [
+    "requisition", "accession", "mrn", "order", "req#", "specimen id", "accession#"
+]
+
+
+def _is_valid_cfu_context(report_text: str, match_start: int, match_end: int) -> bool:
+    """
+    Check if a matched number is in a valid CFU context.
+
+    Returns False if the surrounding text contains ID-related keywords
+    (requisition, accession, MRN, etc.).
+
+    Returns True otherwise (the number may be a valid CFU).
+    """
+    # Get 150 chars before and after the match
+    context_start = max(0, match_start - 150)
+    context_end = min(len(report_text), match_end + 150)
+    context = report_text[context_start:context_end].lower()
+
+    # Reject if negative context words are present
+    for word in _NEGATIVE_CONTEXT_WORDS:
+        if word in context:
+            return False
+
+    return True
+
 
 # ---------------------------------------------------------------------------
 # CFU normalisation helper (Section 5.4) - ENHANCED
@@ -220,14 +333,16 @@ def _parse_cfu(report_text: str) -> tuple[int, bool]:
         except ValueError:
             pass
 
-    # 5. Alternative: standalone 100,000 pattern
+    # 5. Alternative: standalone 100,000 pattern (with context validation)
     m = _RE_CFU_ALT4.search(text)
     if m:
-        raw = m.group(1).replace(",", "")
-        try:
-            return int(raw), True
-        except ValueError:
-            pass
+        # Validate context before accepting - reject if looks like requisition/accession
+        if _is_valid_cfu_context(text, m.start(), m.end()):
+            raw = m.group(1).replace(",", "")
+            try:
+                return int(raw), True
+            except ValueError:
+                pass
 
     # 6. TNTC
     if _RE_CFU_WORD.search(text):
@@ -245,18 +360,56 @@ def _parse_cfu(report_text: str) -> tuple[int, bool]:
         except (ValueError, OverflowError):
             pass
 
-    # 9. Bare large integer (≥5 digits) — last resort fallback
+    # 9. Bare large integer (≥5 digits) — last resort fallback (with context validation)
     m = _RE_CFU_RAW_NUMBER.search(text)
     if m:
-        raw = m.group(1).replace(",", "")
+        # Validate context before accepting - reject if looks like requisition/accession
+        if _is_valid_cfu_context(text, m.start(), m.end()):
+            raw = m.group(1).replace(",", "")
+            try:
+                val = int(raw)
+                warnings.warn(
+                    f"CFU parsed from bare number '{raw}' — review report text.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                return val, True
+            except ValueError:
+                pass
+
+    # 10. Colony Count format: "Colony Count: X"
+    m = _RE_CFU_COLONY.search(text)
+    if m:
+        raw = m.group(1).replace(",", "").replace(">", "").replace("<", "").strip()
         try:
-            val = int(raw)
-            warnings.warn(
-                f"CFU parsed from bare number '{raw}' — review report text.",
-                UserWarning,
-                stacklevel=3,
-            )
-            return val, True
+            return int(raw), True
+        except ValueError:
+            pass
+
+    # 11. Table cell format: "| Colony Count | >100,000 |"
+    m = _RE_CFU_TABLE.search(text)
+    if m:
+        raw = m.group(1).replace(",", "").replace(">", "").replace("<", "").strip()
+        try:
+            return int(raw), True
+        except ValueError:
+            pass
+
+    # 12. Result format: "Result: X CFU" or "Result: X/mL"
+    m = _RE_CFU_RESULT.search(text)
+    if m:
+        raw = m.group(1).replace(",", "").replace(">", "").replace("<", "").strip()
+        try:
+            return int(raw), True
+        except ValueError:
+            pass
+
+    # 13. Bacterial Count format: "Bacterial Count: X"
+    m = _RE_CFU_BACTERIAL.search(text)
+    if m:
+        raw = m.group(1).replace(",", "").replace(">", "").replace("<", "").strip()
+        try:
+            return int(raw), True
         except ValueError:
             pass
 
@@ -354,6 +507,10 @@ def _parse_organism(report_text: str) -> Optional[str]:
         _RE_ORGANISM_ALT2,  # Isolated:
         _RE_ORGANISM_ALT3,  # Identification:
         _RE_ORGANISM_ALT4,  # Culture result:
+        _RE_ORGANISM_ALT6,  # Bacteria:
+        _RE_ORGANISM_ALT7,  # Pathogen:
+        _RE_ORGANISM_ALT8,  # Organism Name:
+        _RE_ORGANISM_TABLE,  # Table cell: | Organism | X |
     ]
 
     for pattern in patterns:
@@ -636,6 +793,60 @@ def debug_extraction(report_text: str, label: str = "Report") -> dict:
     }
 
 
+# Stool-specific result patterns
+_RE_STOOL_RESULT = re.compile(
+    r"(?:Result|Finding|Culture\s+Result)[\s:]+(Positive|Negative|No\s+Growth|Growth\s+Detected|No\s+Pathogens|Pathogens\s+Found)",
+    re.IGNORECASE
+)
+_RE_STOOL_POSITIVE = re.compile(r"\b(positive|detected|isolated|found)\b", re.IGNORECASE)
+_RE_STOOL_NEGATIVE = re.compile(r"\b(negative|not\s+detected|no\s+(?:growth|pathogens|isolates))\b", re.IGNORECASE)
+
+
+def _parse_stool_result(report_text: str) -> tuple[str, list[str], str]:
+    """
+    Extract stool-specific fields from a GI culture report.
+
+    Returns:
+        (result, pathogens_detected, notes) tuple
+    """
+    text = report_text.strip()
+    result = "unknown"
+    pathogens = []
+    notes = ""
+
+    # Detect overall result
+    if _RE_STOOL_POSITIVE.search(text):
+        result = "Positive"
+    elif _RE_STOOL_NEGATIVE.search(text):
+        result = "Negative"
+
+    # Try explicit result pattern
+    m = _RE_STOOL_RESULT.search(text)
+    if m:
+        result = m.group(1).strip()
+
+    # Extract pathogens (use existing organism parser but collect all)
+    organism = _parse_organism(text)
+    if organism and organism not in ("unknown", "mixed flora", "normal flora"):
+        pathogens.append(organism)
+
+    # Try to find additional pathogens mentioned
+    # Look for "isolated:", "detected:", "identified:" patterns
+    for pattern in [_RE_ORGANISM_ALT2, _RE_ORGANISM_ALT3]:
+        for m in pattern.finditer(text):
+            potential = m.group(1).strip()
+            normalized = normalize_organism(potential)
+            if normalized and normalized not in pathogens and normalized not in ("unknown", "mixed flora"):
+                pathogens.append(normalized)
+
+    # Extract lab notes (look for "Notes:", "Comments:", "Remark:")
+    notes_match = re.search(r"(?:Notes?|Comments?|Remarks?|Interpretation)[\s:]+([^\n]+(?:\n[^\n]+)*)", text, re.IGNORECASE)
+    if notes_match:
+        notes = notes_match.group(1).strip()[:500]  # Limit to 500 chars
+
+    return result, pathogens, notes
+
+
 # ---------------------------------------------------------------------------
 # Public extraction function
 # ---------------------------------------------------------------------------
@@ -645,36 +856,80 @@ def extract_structured_data(report_text: str) -> CultureReport:
     """
     Parse a free-text culture report into a typed CultureReport.
 
+    SPECIMEN-FIRST EXTRACTION PIPELINE:
+        STEP 1: Detect specimen type FIRST
+        STEP 2: Branch extraction based on specimen type
+
     Now supports direct file paths via Docling processing.
 
     Rules:
         - Organism field: stripped, normalised via ORGANISM_ALIASES
-        - CFU: commas removed, converted to int; TNTC=999999
+        - CFU: commas removed, converted to int; TNTC=999999 (urine only)
         - resistance_markers: deduplicated, uppercase
         - contamination_flag: True if organism in contamination_terms
         - raw_text: stored as-is (or docling processed), NEVER forwarded to MedGemma
 
     Raises:
-        ExtractionError: if both organism AND cfu fail to parse.
+        ExtractionError: if extraction fails for the specimen type.
     """
     # Pre-process with Docling (handles file paths or raw text)
     processed_text = _process_with_docling(report_text)
 
+    # STEP 1: Detect specimen type FIRST
+    specimen_type = detect_specimen_type(processed_text)
+
+    # If detection failed, fall back to existing specimen parser
+    if specimen_type == "unknown":
+        specimen_type = _parse_specimen(processed_text)
+
+    # STEP 2: Branch based on specimen type
+    if specimen_type == "stool":
+        return _extract_stool_report(processed_text, specimen_type)
+    else:
+        # Urine or unknown: use existing extraction logic
+        return _extract_urine_report(processed_text, specimen_type, report_text)
+
+
+def _extract_urine_report(processed_text: str, specimen_type: str, original_text: str = "") -> CultureReport:
+    """
+    Extract urine culture report using existing logic.
+
+    Args:
+        processed_text: Docling-processed text
+        specimen_type: Detected specimen type
+        original_text: Original report text (for fallback)
+    """
     # Attempt extraction on processed text
     organism = _parse_organism(processed_text)
     cfu, cfu_ok = _parse_cfu(processed_text)
 
     # Fallback: if extraction failed and text was modified by Docling, try original
-    if (organism is None and not cfu_ok) and processed_text != report_text:
-        organism = _parse_organism(report_text)
-        cfu, cfu_ok = _parse_cfu(report_text)
+    if (organism is None and not cfu_ok) and processed_text != original_text:
+        organism = _parse_organism(original_text)
+        cfu, cfu_ok = _parse_cfu(original_text)
         if organism is not None or cfu_ok:
-            processed_text = report_text  # Revert to original for other fields
+            processed_text = original_text  # Revert to original for other fields
 
     if organism is None and not cfu_ok:
         raise ExtractionError(
             "Extraction failed: could not parse organism OR CFU/mL from report. "
             "Check report format."
+        )
+
+    # Suspicious CFU check: values > 10 million are likely requisition/accession numbers
+    SUSPICIOUS_CFU_THRESHOLD = 10_000_000  # 10 million - higher than any realistic CFU
+    is_suspicious_cfu = cfu > SUSPICIOUS_CFU_THRESHOLD
+
+    if is_suspicious_cfu:
+        warnings.warn(
+            f"CFU value {cfu} appears suspicious (may be requisition/accession number). "
+            "Consider manual verification.",
+            UserWarning,
+            stacklevel=2,
+        )
+        raise ExtractionError(
+            f"Extraction failed: CFU value {cfu} appears to be a requisition or accession number, "
+            "not a valid colony count. Check report format."
         )
 
     # If only organism failed, use a placeholder and warn
@@ -685,7 +940,6 @@ def extract_structured_data(report_text: str) -> CultureReport:
         organism = "unknown"
 
     resistance_markers = _parse_resistance_markers(processed_text)
-    specimen_type = _parse_specimen(processed_text)
     contamination_flag = _is_contamination(organism)
     date = _parse_date(processed_text)
     susceptibility_profile = _parse_susceptibility_profile(processed_text)
@@ -699,6 +953,66 @@ def extract_structured_data(report_text: str) -> CultureReport:
         specimen_type=specimen_type,
         contamination_flag=contamination_flag,
         raw_text=processed_text,  # Store the text actually used for extraction
+    )
+
+
+def _extract_stool_report(processed_text: str, specimen_type: str) -> CultureReport:
+    """
+    Extract stool culture report with stool-specific fields.
+
+    Stool reports use Positive/Negative results instead of CFU counts.
+
+    Args:
+        processed_text: Docling-processed text
+        specimen_type: Detected specimen type (should be "stool")
+    """
+    # Extract stool-specific fields
+    result, pathogens, notes = _parse_stool_result(processed_text)
+
+    # For stool, organism is the primary pathogen (if any)
+    organism = pathogens[0] if pathogens else "unknown"
+
+    # For stool, CFU is always 0 (not applicable)
+    cfu = 0
+
+    # If no organism found and no result, this might be extraction failure
+    if organism == "unknown" and result == "unknown":
+        # Check for meaningful content indicators
+        has_culture_content = any([
+            "culture" in processed_text.lower(),
+            "specimen" in processed_text.lower(),
+            "organism" in processed_text.lower(),
+            "pathogen" in processed_text.lower(),
+            "bacteria" in processed_text.lower(),
+            "isolated" in processed_text.lower(),
+            "salmonella" in processed_text.lower(),
+            "e. coli" in processed_text.lower() or "escherichia" in processed_text.lower(),
+        ])
+
+        if not has_culture_content:
+            raise ExtractionError(
+                "Extraction failed: could not parse stool culture data from report. "
+                "No organism, result, or culture indicators found. "
+                "Check report format."
+            )
+
+    # Extract date and resistance markers (still relevant for stool)
+    date = _parse_date(processed_text)
+    resistance_markers = _parse_resistance_markers(processed_text)
+    contamination_flag = _is_contamination(organism)
+
+    return CultureReport(
+        date=date,
+        organism=organism,
+        cfu=cfu,
+        resistance_markers=resistance_markers,
+        susceptibility_profile=[],  # Not typically applicable for stool
+        specimen_type=specimen_type,
+        contamination_flag=contamination_flag,
+        raw_text=processed_text,
+        specimen_result=result,
+        pathogens_detected=pathogens,
+        specimen_notes=notes,
     )
 
 

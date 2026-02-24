@@ -35,12 +35,16 @@ class CultureReport:
     Fields:
         date: ISO 8601 formatted date string (YYYY-MM-DD)
         organism: Name of identified organism (e.g., "E. coli")
-        cfu: Colony Forming Units per mL
+        cfu: Colony Forming Units per mL (0 for stool reports)
         resistance_markers: List of resistance markers (subset of ["ESBL","CRE","MRSA","VRE","CRKP"])
         susceptibility_profile: Full antimicrobial susceptibility table
         specimen_type: Type of specimen ("urine" | "stool" | "unknown")
         contamination_flag: True if organism matches contamination terms
         raw_text: Original report string (NEVER passed to LLM)
+        clean_document_text: PII-scrubbed full document text (safe to send to MedGemma)
+        specimen_result: Stool-specific result ("Positive", "Negative", "No Growth", etc.)
+        pathogens_detected: Stool-specific list of organisms found
+        specimen_notes: Stool-specific lab notes/comments
     """
 
     date: str
@@ -51,6 +55,12 @@ class CultureReport:
     specimen_type: str
     contamination_flag: bool
     raw_text: str
+    clean_document_text: str = ""
+
+    # Stool-specific fields
+    specimen_result: str = ""           # "Positive", "Negative", "No Growth", etc.
+    pathogens_detected: List[str] = field(default_factory=list)  # Organism names found
+    specimen_notes: str = ""            # Lab comments for stool reports
 
 
 @dataclass

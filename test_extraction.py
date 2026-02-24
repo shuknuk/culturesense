@@ -338,9 +338,18 @@ try:
         r17.specimen_type == "stool",
         f"specimen_type detected via fecal keyword  (got '{r17.specimen_type}')",
     )
+    # Stool reports use specimen_result instead of CFU (CFU=0 by design)
     _assert(
-        r17.cfu == 45000,
-        f"cfu == 45000  (got {r17.cfu})",
+        r17.cfu == 0,
+        f"cfu == 0 for stool reports  (got {r17.cfu})",
+    )
+    _assert(
+        r17.specimen_result == "Positive",
+        f"specimen_result == 'Positive' for stool with detected organism  (got '{r17.specimen_result}')",
+    )
+    _assert(
+        "salmonella" in r17.organism.lower() or any("salmonella" in p.lower() for p in r17.pathogens_detected),
+        f"Salmonella detected in organism or pathogens  (got organism='{r17.organism}', pathogens={r17.pathogens_detected})",
     )
 except ExtractionError as e:
     _assert(False, f"Extraction failed for stool culture test: {e}")

@@ -11,6 +11,7 @@ Tab B (manual entry) is the existing flow — zero modifications.
 """
 
 import os
+import re
 import tempfile
 import time
 import warnings
@@ -184,6 +185,11 @@ def process_pdf_file(pdf_path: str) -> Tuple[str, str, str]:
         markdown_text = result.document.export_to_markdown()
         debug_info += f"✓ Markdown exported ({len(markdown_text)} chars)\n"
 
+        # DEBUG: Log first 1000 chars of markdown to see table structure
+        debug_info += f"\n=== MARKDOWN OUTPUT (first 1000 chars) ===\n"
+        debug_info += markdown_text[:1000]
+        debug_info += f"\n=== END MARKDOWN PREVIEW ===\n\n"
+
         # Preview first 500 chars for debugging
         preview = markdown_text[:500].replace("\n", " ")
         debug_info += f"Preview: {preview}...\n"
@@ -223,11 +229,6 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
     """
     import re
 
-    # Try splitting on "---" or "===" separators
-    blocks = re.split(r"\n(?:---+|===+)\n", markdown_text)
-    if len(blocks) > 1:
-        return [b.strip() for b in blocks if b.strip()]
-
     # Find all "Collected:" dates in order
     collected_pattern = re.compile(r"Collected:\s*(\d{4}-\d{2}-\d{2})")
     collected_dates = collected_pattern.findall(markdown_text)
@@ -244,10 +245,12 @@ def _split_into_report_blocks(markdown_text: str) -> List[str]:
             if not part:
                 continue
 
-            # Assign date by index (in order of appearance)
-            date_idx = i - 1
-            if date_idx < len(collected_dates):
-                part = f"Collected: {collected_dates[date_idx]}\n\n" + part
+            # Only inject date if block doesn't already have one
+            has_own_date = bool(collected_pattern.search(part))
+            if not has_own_date:
+                date_idx = i - 1
+                if date_idx < len(collected_dates):
+                    part = f"Collected: {collected_dates[date_idx]}\n\n" + part
 
             result.append(part)
         return result
@@ -287,70 +290,140 @@ def _format_susceptibility_summary(report: CultureReport) -> str:
     return f"{total} antibiotics: {s_count}S/{i_count}I/{r_count}R"
 
 
+def get_dataframe_headers(reports: List[CultureReport]) -> List[str]:
+    """Return appropriate headers based on specimen types in reports."""
+    has_stool = any(r.specimen_type == "stool" for r in reports)
+
+    if has_stool:
+        return ["Date", "Specimen", "Organism", "Result", "Pathogens Detected", "Notes"]
+    else:
+        return ["Date", "Specimen", "Organism", "CFU/mL", "Resistance Markers", "Susceptibility Profile"]
+
+
 def reports_to_dataframe_rows(reports: List[CultureReport]) -> List[List[str]]:
-    """Convert CultureReport list to list of list strings for gr.Dataframe."""
+    """Convert CultureReport list to list of list strings for gr.Dataframe.
+
+    Specimen-aware: shows different columns for stool vs urine reports.
+    """
     rows = []
     for r in reports:
         warn = _WARN_PREFIX if _is_low_confidence(r) else ""
-        sus_summary = _format_susceptibility_summary(r)
-        rows.append(
-            [
+
+        if r.specimen_type == "stool":
+            # Stool columns: Date | Specimen | Organism | Result | Pathogens | Notes
+            rows.append([
+                f"{warn}{r.date}",
+                r.specimen_type,
+                r.organism,
+                r.specimen_result or "—",
+                ", ".join(r.pathogens_detected) if r.pathogens_detected else "—",
+                r.specimen_notes[:100] if r.specimen_notes else "—",
+            ])
+        else:
+            # Urine columns: Date | Specimen | Organism | CFU/mL | Resistance | Susceptibility
+            sus_summary = _format_susceptibility_summary(r)
+            rows.append([
                 f"{warn}{r.date}",
                 r.specimen_type,
                 r.organism,
                 str(r.cfu),
                 ", ".join(r.resistance_markers) if r.resistance_markers else "—",
                 sus_summary,
-            ]
-        )
+            ])
+
     return rows
 
 
 def dataframe_row_to_culture_report(
     row: List[str], original_reports: List[CultureReport] = None
 ) -> CultureReport:
-    """Convert a single Dataframe row (list of strings) back to CultureReport."""
+    """
+    Convert a single Dataframe row (list of strings) back to CultureReport.
+
+    Specimen-aware: handles both urine and stool row formats.
+    """
     from rules import normalize_organism
 
     date_str = row[0].replace(_WARN_PREFIX, "").strip()
     specimen = row[1].strip()
     organism = normalize_organism(row[2].strip())
-    cfu_str = row[3].replace(",", "").strip()
-    resistance_str = row[4].strip()
 
-    try:
-        cfu = int(cfu_str)
-    except ValueError:
-        cfu = 0
+    if specimen == "stool":
+        # Stool columns: Date | Specimen | Organism | Result | Pathogens | Notes
+        specimen_result = row[3].strip() if len(row) > 3 and row[3].strip() != "—" else ""
+        pathogens_str = row[4].strip() if len(row) > 4 else ""
+        specimen_notes = row[5].strip() if len(row) > 5 and row[5].strip() != "—" else ""
 
-    resistance_markers = (
-        [m.strip() for m in resistance_str.split(",") if m.strip() not in ("—", "")]
-        if resistance_str != "—"
-        else []
-    )
+        pathogens_detected = (
+            [p.strip() for p in pathogens_str.split(",") if p.strip() not in ("—", "")]
+            if pathogens_str and pathogens_str != "—"
+            else []
+        )
 
-    # Try to find matching original report to preserve susceptibility profile
-    susceptibility_profile = []
-    if original_reports:
-        for orig in original_reports:
-            # Match by organism (normalized) and CFU value
-            orig_organism = normalize_organism(orig.organism)
-            if orig_organism == organism and orig.cfu == cfu:
-                susceptibility_profile = orig.susceptibility_profile
-                break
+        # Try to find matching original report to preserve additional fields
+        specimen_result_orig = specimen_result
+        specimen_notes_orig = specimen_notes
+        if original_reports:
+            for orig in original_reports:
+                orig_organism = normalize_organism(orig.organism)
+                if orig_organism == organism and orig.specimen_type == "stool":
+                    specimen_result_orig = orig.specimen_result or specimen_result
+                    specimen_notes_orig = orig.specimen_notes or specimen_notes
+                    break
 
-    return CultureReport(
-        date=date_str,
-        organism=organism,
-        cfu=cfu,
-        resistance_markers=resistance_markers,
-        susceptibility_profile=susceptibility_profile,  # Preserved from original extraction
-        specimen_type=specimen,
-        contamination_flag=any(
-            term in organism.lower() for term in RULES["contamination_terms"]
-        ),
-        raw_text="",  # Not needed for downstream pipeline
-    )
+        return CultureReport(
+            date=date_str,
+            organism=organism,
+            cfu=0,  # Not applicable for stool
+            resistance_markers=[],  # Not typically shown for stool
+            susceptibility_profile=[],
+            specimen_type=specimen,
+            contamination_flag=any(
+                term in organism.lower() for term in RULES["contamination_terms"]
+            ),
+            raw_text="",
+            specimen_result=specimen_result_orig,
+            pathogens_detected=pathogens_detected,
+            specimen_notes=specimen_notes_orig,
+        )
+    else:
+        # Urine columns: Date | Specimen | Organism | CFU/mL | Resistance | Susceptibility
+        cfu_str = row[3].replace(",", "").strip() if len(row) > 3 else "0"
+        resistance_str = row[4].strip() if len(row) > 4 else ""
+
+        try:
+            cfu = int(cfu_str)
+        except ValueError:
+            cfu = 0
+
+        resistance_markers = (
+            [m.strip() for m in resistance_str.split(",") if m.strip() not in ("—", "")]
+            if resistance_str != "—"
+            else []
+        )
+
+        # Try to find matching original report to preserve susceptibility profile
+        susceptibility_profile = []
+        if original_reports:
+            for orig in original_reports:
+                # Match by organism (normalized) and CFU value
+                orig_organism = normalize_organism(orig.organism)
+                if orig_organism == organism and orig.cfu == cfu:
+                    susceptibility_profile = orig.susceptibility_profile
+                    break
+
+        return CultureReport(
+            date=date_str,
+            organism=organism,
+            cfu=cfu,
+            resistance_markers=resistance_markers,
+            susceptibility_profile=susceptibility_profile,
+            specimen_type=specimen,
+            contamination_flag=any(
+                term in organism.lower() for term in RULES["contamination_terms"]
+            ),
+            raw_text="",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +519,8 @@ def process_uploaded_pdfs(
                     )
 
                 # Override raw_text to the docling markdown block
+                # Store PII-scrubbed version in clean_document_text for MedGemma reasoning
+                clean_text = scrub_pii(block)
                 report = CultureReport(
                     date=report.date,
                     organism=report.organism,
@@ -455,11 +530,36 @@ def process_uploaded_pdfs(
                     specimen_type=report.specimen_type,
                     contamination_flag=report.contamination_flag,
                     raw_text=block,  # stored for accordion; never forwarded to MedGemma
+                    clean_document_text=clean_text,  # PII-scrubbed version for MedGemma
                 )
                 file_reports.append(report)
 
             except ExtractionError as e:
                 debug_log += f"    ✗ ExtractionError: {e}\n"
+                # Debug: show what patterns were found/not found
+                debug_log += f"    DEBUG: Block preview (first 300 chars):\n"
+                debug_log += f"    {block[:300]}...\n"
+                debug_log += f"    DEBUG: Pattern search:\n"
+                if re.search(r"CFU|cfu", block):
+                    debug_log += f"      - 'CFU' keyword found\n"
+                else:
+                    debug_log += f"      - 'CFU' keyword NOT found\n"
+                if re.search(r"Organism|ORGANISM", block):
+                    debug_log += f"      - 'Organism' keyword found\n"
+                else:
+                    debug_log += f"      - 'Organism' keyword NOT found\n"
+                if re.search(r"Colony", block, re.IGNORECASE):
+                    debug_log += f"      - 'Colony' keyword found\n"
+                else:
+                    debug_log += f"      - 'Colony' keyword NOT found\n"
+                if re.search(r"Bacteria", block, re.IGNORECASE):
+                    debug_log += f"      - 'Bacteria' keyword found\n"
+                else:
+                    debug_log += f"      - 'Bacteria' keyword NOT found\n"
+                if re.search(r"\d{4}-\d{2}-\d{2}", block):
+                    debug_log += f"      - ISO date found\n"
+                else:
+                    debug_log += f"      - ISO date NOT found\n"
                 pass  # block had no parseable culture data
             except Exception as e:
                 debug_log += f"    ✗ Unexpected error: {type(e).__name__}: {e}\n"
@@ -491,19 +591,65 @@ def process_uploaded_pdfs(
     all_reports = [p[0] for p in combined]
     all_raw_blocks = [p[1] for p in combined]
 
-    # Deduplicate: same (date, organism, cfu) → keep first
+    # TWO-PASS DEDUPLICATION
+    # Pass 1: Identify dates that have at least one successful extraction
+    dates_with_success: set = set()
+    for report in all_reports:
+        # For stool, cfu=0 is normal — a report with a known specimen_result is successful
+        stool_success = (
+            report.specimen_type == "stool"
+            and (report.specimen_result or "") not in ("unknown", "")
+        )
+        if report.organism != "unknown" or report.cfu != 0 or stool_success:
+            dates_with_success.add(report.date)
+
+    debug_log += f"Dates with successful extractions: {sorted(dates_with_success)}\n"
+
+    # Pass 2: Deduplicate, skipping failed extractions for dates with success
     seen: set = set()
     deduped_reports: List[CultureReport] = []
     deduped_blocks: List[str] = []
+
     for report, block in zip(all_reports, all_raw_blocks):
-        key = (report.date, report.organism, report.cfu)
-        if key in seen:
-            debug_log += f"⚠ Duplicate record skipped: {key}\n"
-            warnings.warn(f"Duplicate record skipped: {key}", UserWarning, stacklevel=2)
+        # For stool: cfu=0 is always normal; only mark as failed if date AND
+        # specimen_result AND organism are all unknown (truly nothing extracted)
+        if report.specimen_type == "stool":
+            is_failed_extraction = (
+                report.organism == "unknown"
+                and (report.specimen_result or "") in ("unknown", "")
+                and report.date == "unknown"
+            )
         else:
+            is_failed_extraction = report.organism == "unknown" and report.cfu == 0
+
+        if is_failed_extraction:
+            # Skip failed extraction if ANY report for this date has successful extraction
+            if report.date in dates_with_success:
+                debug_log += f"  ⚠ Failed extraction skipped (successful extraction exists for {report.date})\n"
+                continue
+            # Also skip if we already have a failed extraction for this date
+            key = (report.date, "failed")
+            if key in seen:
+                debug_log += f"  ⚠ Duplicate failed extraction skipped: date={report.date}\n"
+                continue
             seen.add(key)
             deduped_reports.append(report)
             deduped_blocks.append(block)
+            debug_log += f"  ⚠ Kept failed extraction (date={report.date})\n"
+        else:
+            # Successful extraction
+            # For stool, use specimen_result instead of cfu (always 0) as dedup discriminator
+            if report.specimen_type == "stool":
+                key = (report.date, report.organism, report.specimen_result or "")
+            else:
+                key = (report.date, report.organism, report.cfu)
+            if key in seen:
+                debug_log += f"  ⚠ Duplicate record skipped: {key}\n"
+                warnings.warn(f"Duplicate record skipped: {key}", UserWarning, stacklevel=2)
+            else:
+                seen.add(key)
+                deduped_reports.append(report)
+                deduped_blocks.append(block)
 
     # Truncate to MAX_RECORDS most recent
     truncation_warning = ""
@@ -1402,8 +1548,9 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                             '<span class="status-light status-light-white"></span>Awaiting analysis...',  # medgemma_status
                         )
 
-                    # Build dataframe rows
+                    # Build dataframe rows and headers (specimen-aware)
                     df_rows = reports_to_dataframe_rows(reports)
+                    df_headers = get_dataframe_headers(reports)
 
                     # Build raw text box updates (pre-created 3 boxes)
                     raw_updates = []
@@ -1427,7 +1574,7 @@ def build_gradio_app(model, tokenizer, is_stub: bool) -> gr.Blocks:
                         gr.update(visible=True),  # show screen_confirm
                         gr.update(visible=False),  # hide screen_output
                         gr.update(visible=False),  # hide all_failed_panel
-                        df_rows,
+                        gr.update(value=df_rows, headers=df_headers),  # confirm_table with dynamic headers
                         trunc_warn,
                         raw_updates[0],
                         raw_updates[1],
